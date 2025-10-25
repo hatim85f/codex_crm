@@ -8,7 +8,9 @@ const db =
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(db);
+    await mongoose.connect(db, {
+      autoIndex: false,
+    });
 
     console.log("Codex CRM DB server connected");
   } catch (error) {

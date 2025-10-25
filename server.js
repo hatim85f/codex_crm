@@ -18,6 +18,7 @@ app.get("/", (__req, res) =>
 );
 
 app.use("/api/users", require("./routes/api/users"));
+app.use("/api/auth", require("./routes/api/auth"));
 
 // not found
 app.use((req, res, next) => {
