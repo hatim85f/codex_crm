@@ -17,6 +17,10 @@ const UserSchema = Schema(
         return this.firstName + " " + this.lastName;
       },
     },
+    userPhone: {
+      type: String,
+      default: "",
+    },
     profilePicture: {
       type: String,
       default: "",

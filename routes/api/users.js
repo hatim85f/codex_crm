@@ -24,6 +24,7 @@ router.post("/create", async (req, res) => {
     email,
     password,
     profilePicture,
+    userPhone,
   } = req.body;
 
   try {
@@ -90,6 +91,7 @@ router.post("/create", async (req, res) => {
         profilePicture,
         role: "admin",
         isAuthorized: true,
+        userPhone,
         organizationId: org._id,
       });
 
