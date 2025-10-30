@@ -6,6 +6,9 @@ const auth = require("../../middleware/auth");
 const bcrypt = require("bcryptjs");
 const config = require("config");
 const jwt = require("jsonwebtoken");
+const cors = require("cors");
+
+router.use(cors());
 
 router.post("/create", async (req, res) => {
   const {
