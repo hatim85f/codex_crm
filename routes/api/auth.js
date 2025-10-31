@@ -41,14 +41,14 @@ router.post(
       if (!user) {
         return res
           .status(400)
-          .json({ errors: [{ message: "Invalid Email or Password" }] });
+          .json({ error: "ERROR!", message: "Invalid username or password" });
       }
 
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
         return res
           .status(400)
-          .json({ errors: [{ message: "Invalid Email or Password" }] });
+          .json({ error: "ERROR!", message: "Invalid username or password" });
       }
 
       const payload = {
