@@ -5,6 +5,9 @@ const jwt = require("jsonwebtoken");
 const config = require("config");
 const { check, validationResult } = require("express-validator");
 const User = require("../../models/User");
+const ResetToken = require("../../models/ResetToken");
+const { sendTemplateEmail } = require("../../lib/brevo");
+const moment = require("moment");
 
 // @route   POST api/auth/login
 // @desc    Authenticate user & get token
@@ -66,5 +69,50 @@ router.post(
     }
   }
 );
+
+router.post("/forgot-password", async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(400).send({
+        error: "ERROR !",
+        message: "User with this email does not exist.",
+      });
+    }
+
+    const resetToken = Math.floor(10000 + Math.random() * 900000).toString();
+
+    const newReset = new ResetToken({
+      resetToken,
+      user: user._id,
+    });
+
+    await newReset.save();
+
+    await sendTemplateEmail({
+      to: email,
+      name: user.fullName,
+      templateId: 3,
+      params: {
+        userName: user.fullName,
+        otp: resetToken,
+        time: moment(new Date()).format("DD MMM YYYY, hh:mm A"),
+      },
+    });
+
+    return res.status(200).send({
+      message: "Password reset token generated successfully.",
+      resetToken,
+    });
+  } catch (error) {
+    return res.status(500).send({
+      error: "ERROR !",
+      message: error.message,
+    });
+  }
+});
 
 module.exports = router;
