@@ -74,6 +74,8 @@ router.post("/forgot-password", async (req, res) => {
   const { email } = req.body;
 
   try {
+    let message = "";
+
     const user = await User.findOne({ email });
 
     if (!user) {
@@ -81,6 +83,14 @@ router.post("/forgot-password", async (req, res) => {
         error: "ERROR !",
         message: "User with this email does not exist.",
       });
+    }
+
+    const isResetTokenExist = await ResetToken.findOne({ user: user._id });
+    if (isResetTokenExist) {
+      await isResetTokenExist.deleteOne();
+      message = "A new reset token has been sent to your email.";
+    } else {
+      message = "Password reset token generated successfully.";
     }
 
     const resetToken = Math.floor(10000 + Math.random() * 900000).toString();
@@ -104,7 +114,7 @@ router.post("/forgot-password", async (req, res) => {
     });
 
     return res.status(200).send({
-      message: "Password reset token generated successfully.",
+      message: message,
       resetToken,
     });
   } catch (error) {
