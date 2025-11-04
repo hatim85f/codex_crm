@@ -120,7 +120,33 @@ router.post("/forgot-password", async (req, res) => {
   } catch (error) {
     return res.status(500).send({
       error: "ERROR !",
-      message: error.message,
+      message: "Internal Server Error, please try again later.",
+    });
+  }
+});
+
+router.post("/check-reset-code", async (req, res) => {
+  const { userId, resetCode } = req.body;
+
+  try {
+    const resetToken = await ResetToken.findOne({
+      user: userId,
+      resetToken: resetCode.toString(),
+    });
+    if (!resetToken) {
+      return res.status(400).send({
+        error: "ERROR !",
+        message: "Invalid reset code.",
+      });
+    }
+
+    return res.status(200).send({
+      message: "Reset code is valid.",
+    });
+  } catch (error) {
+    return res.status(500).send({
+      error: "ERROR !",
+      message: "Internal Server Error, please try again later.",
     });
   }
 });
