@@ -12,6 +12,10 @@ const ResetToken = Schema(
       ref: "users",
       required: true,
     },
+    email: {
+      type: String,
+      required: true,
+    },
   },
   {
     timestamps: true,

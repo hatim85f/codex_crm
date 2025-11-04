@@ -98,6 +98,7 @@ router.post("/forgot-password", async (req, res) => {
     const newReset = new ResetToken({
       resetToken,
       user: user._id,
+      email: email,
     });
 
     await newReset.save();
@@ -126,11 +127,11 @@ router.post("/forgot-password", async (req, res) => {
 });
 
 router.post("/check-reset-code", async (req, res) => {
-  const { userId, resetCode } = req.body;
+  const { email, resetCode } = req.body;
 
   try {
     const resetToken = await ResetToken.findOne({
-      user: userId,
+      email: email,
       resetToken: resetCode.toString(),
     });
     if (!resetToken) {
