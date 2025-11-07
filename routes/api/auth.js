@@ -179,7 +179,7 @@ router.put("/reset-password", async (req, rs) => {
   } catch (error) {
     return res.status(500).send({
       error: "ERROR !",
-      message: "Internal Server Error, please try again later.",
+      message: error.message,
     });
   }
 });
