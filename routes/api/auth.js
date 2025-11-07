@@ -150,7 +150,7 @@ router.post("/check-reset-code", async (req, res) => {
   } catch (error) {
     return res.status(500).send({
       error: "ERROR !",
-      message: "Internal Server Error, please try again later.",
+      message: error.message,
     });
   }
 });
