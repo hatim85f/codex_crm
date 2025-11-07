@@ -139,10 +139,41 @@ router.post("/check-reset-code", async (req, res) => {
         error: "ERROR !",
         message: "Invalid reset code.",
       });
+    } else {
+      await resetToken.deleteOne({ email: email });
     }
 
     return res.status(200).send({
       message: "Reset code is valid.",
+    });
+  } catch (error) {
+    return res.status(500).send({
+      error: "ERROR !",
+      message: "Internal Server Error, please try again later.",
+    });
+  }
+});
+
+router.put("/reset-password", async (req, rs) => {
+  const { email, newPassword } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return rs.status(400).send({
+        error: "ERROR !",
+        message: "User with this email does not exist.",
+      });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    user.password = hashedPassword;
+    await user.save();
+    return res.status(200).send({
+      message: "Password reset successfully.",
     });
   } catch (error) {
     return res.status(500).send({
