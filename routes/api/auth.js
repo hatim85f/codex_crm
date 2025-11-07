@@ -133,7 +133,7 @@ router.post("/check-reset-code", async (req, res) => {
   try {
     const resetToken = await ResetToken.findOne({
       email: email,
-      resetToken: resetCode.toString(),
+      resetToken: resetCode,
     });
     if (!resetToken) {
       return res.status(400).send({
