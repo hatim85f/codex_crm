@@ -10,7 +10,7 @@ const moment = require("moment");
 // @route   GET api/team
 // @desc    Get team info
 // @access  Public
-router.get("/:userId", async (req, res) => {
+router.get("/:userId", auth, async (req, res) => {
   const { userId } = req.params;
 
   try {
@@ -27,7 +27,7 @@ router.get("/:userId", async (req, res) => {
 // @route   POST api/team
 // @desc    Create a new team
 // @access  PRIVATE
-router.post("/", async (req, res) => {
+router.post("/", auth, async (req, res) => {
   const { userId, name } = req.body;
 
   try {
