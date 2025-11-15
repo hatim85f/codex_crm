@@ -10,8 +10,18 @@ const moment = require("moment");
 // @route   GET api/team
 // @desc    Get team info
 // @access  Public
-router.get("/", async (req, res) => {
-  return res.status(200).send({ message: "Team info endpoint" });
+router.get("/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const teams = await Team.find({ manager: userId });
+
+    return res.status(200).send({ teams });
+  } catch (error) {
+    return res
+      .status(500)
+      .send({ error: "ERROR !", message: error.message || "Server Error" });
+  }
 });
 
 // @route   POST api/team
