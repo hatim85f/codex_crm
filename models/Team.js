@@ -3,9 +3,6 @@ const Schema = mongoose.Schema;
 
 const TeamSchema = Schema(
   {
-    _id: {
-      type: mongoose.Types.ObjectId,
-    },
     organization: {
       type: mongoose.Types.ObjectId,
       ref: "organizations",

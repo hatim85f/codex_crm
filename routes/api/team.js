@@ -17,21 +17,20 @@ router.get("/", async (req, res) => {
 // @route   POST api/team
 // @desc    Create a new team
 // @access  PRIVATE
-router.post("/", auth, async (req, res) => {
+router.post("/", async (req, res) => {
   const { userId, name } = req.body;
 
   try {
     const user = await User.findOne({ _id: userId });
 
     const newTeam = new Team({
-      organiztion: user.organizationId,
+      organization: user.organizationId,
       name,
       manager: userId,
       members: [],
     });
 
-    await newTeam.save();
-
+    await Team.insertOne(newTeam);
     return res
       .status(200)
       .send({ message: "Team created successfully", team: newTeam });
