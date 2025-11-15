@@ -24,6 +24,20 @@ router.get("/:userId", auth, async (req, res) => {
   }
 });
 
+router.get("/:teamId", auth, async (req, res) => {
+  const { teamId } = req.params;
+
+  try {
+    const team = await Team.findOne({ _id: teamId });
+
+    return res.status(200).send({ team });
+  } catch (error) {
+    return res
+      .status(500)
+      .send({ error: "ERROR !", message: error.message || "Server Error " });
+  }
+});
+
 // @route   POST api/team
 // @desc    Create a new team
 // @access  PRIVATE
@@ -43,7 +57,7 @@ router.post("/", auth, async (req, res) => {
     await Team.insertOne(newTeam);
     return res
       .status(200)
-      .send({ message: "Team created successfully", team: newTeam });
+      .send({ message: `Team ${name} created successfully`, team: newTeam });
   } catch (error) {
     return res
       .status(500)
