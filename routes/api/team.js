@@ -98,6 +98,8 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
       $push: { members: newUser._id },
     });
 
+    const team = await Team.findOne({ _id: teamId });
+
     // Send email to the new user
 
     const manager = await User.findOne({ _id: managerId });
@@ -113,6 +115,12 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
         time: moment(new Date()).format("DD MMM YYYY, hh:mm A"),
       },
     });
+
+    return res
+      .status(200)
+      .send({
+        message: `User ${firstName} added successfully to ${team.name} team`,
+      });
   } catch (error) {
     return res
       .status(500)
