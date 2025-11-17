@@ -67,19 +67,13 @@ router.post("/", auth, async (req, res) => {
 
 router.put("/:teamId/add-member", async (req, res) => {
   const { teamId } = req.params;
-  const {
-    firstName,
-    lastName,
-    userPhone,
-    email,
-    password,
-    role,
-    organizationId,
-  } = req.body;
+  const { firstName, lastName, userPhone, email, password, role } = req.body;
 
   try {
     const userPassword = password || Math.random().toString(36).slice(-8);
     const hashedPassword = await bcrypt.hash(userPassword, 10);
+
+    const team = await Team.findOne({ _id: teamId });
 
     const newUser = new User({
       firstName,
@@ -88,13 +82,11 @@ router.put("/:teamId/add-member", async (req, res) => {
       email,
       password: hashedPassword,
       role,
-      organizationId,
+      organizationId: team.organization,
     });
     await newUser.save();
 
     await Team.updateOne({ _id: teamId }, { $push: { members: newUser._id } });
-
-    const team = await Team.findOne({ _id: teamId });
 
     // Send email to the new user
 
