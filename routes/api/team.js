@@ -90,17 +90,17 @@ router.put("/:teamId/add-member", async (req, res) => {
 
     // Send email to the new user
 
-    // await sendTemplateEmail({
-    //   to: email,
-    //   name: firstName + " " + lastName,
-    //   templateId: 4,
-    //   params: {
-    //     userName: firstName + " " + lastName,
-    //     manager: manager.fullName,
-    //     password: userPassword,
-    //     time: moment(new Date()).format("DD MMM YYYY, hh:mm A"),
-    //   },
-    // });
+    await sendTemplateEmail({
+      to: email,
+      name: firstName + " " + lastName,
+      templateId: 4,
+      params: {
+        userName: firstName + " " + lastName,
+        manager: manager.fullName,
+        password: userPassword,
+        time: moment(new Date()).format("DD MMM YYYY, hh:mm A"),
+      },
+    });
 
     return res.status(200).send({
       message: `User ${firstName} added successfully to ${team.name} team`,
