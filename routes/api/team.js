@@ -82,6 +82,8 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
     const userPassword = password || Math.random().toString(36).slice(-8);
     const hashedPassword = await bcrypt.hash(userPassword, 10);
 
+    const manager = await User.findOne({ _id: managerId });
+
     const newUser = new User({
       firstName,
       lastName,
@@ -89,7 +91,7 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
       email,
       password: hashedPassword,
       role,
-      organizationId,
+      organizationId: manager.organizationId,
     });
     await newUser.save();
 
@@ -101,8 +103,6 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
     const team = await Team.findOne({ _id: teamId });
 
     // Send email to the new user
-
-    const manager = await User.findOne({ _id: managerId });
 
     await sendTemplateEmail({
       to: email,
@@ -116,11 +116,9 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
       },
     });
 
-    return res
-      .status(200)
-      .send({
-        message: `User ${firstName} added successfully to ${team.name} team`,
-      });
+    return res.status(200).send({
+      message: `User ${firstName} added successfully to ${team.name} team`,
+    });
   } catch (error) {
     return res
       .status(500)
