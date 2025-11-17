@@ -88,6 +88,8 @@ router.put("/:teamId/add-member", async (req, res) => {
 
     await Team.updateOne({ _id: teamId }, { $push: { members: newUser._id } });
 
+    const manager = await User.findOne({ _id: team.manager });
+
     // Send email to the new user
 
     await sendTemplateEmail({
