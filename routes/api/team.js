@@ -91,7 +91,7 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
       email,
       password: hashedPassword,
       role,
-      organizationId: manager.organizationId,
+      organizationId,
     });
     await newUser.save();
 
