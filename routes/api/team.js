@@ -65,7 +65,7 @@ router.post("/", auth, async (req, res) => {
   }
 });
 
-router.put("/:teamId/add-member", auth, async (req, res) => {
+router.put("/:teamId/add-member", async (req, res) => {
   const { teamId } = req.params;
   const {
     firstName,
@@ -75,14 +75,11 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
     password,
     role,
     organizationId,
-    managerId,
   } = req.body;
 
   try {
     const userPassword = password || Math.random().toString(36).slice(-8);
     const hashedPassword = await bcrypt.hash(userPassword, 10);
-
-    const manager = await User.findOne({ _id: managerId });
 
     const newUser = new User({
       firstName,
@@ -95,26 +92,23 @@ router.put("/:teamId/add-member", auth, async (req, res) => {
     });
     await newUser.save();
 
-    await Team.updateOne({
-      _id: teamId,
-      $push: { members: newUser._id },
-    });
+    await Team.updateOne({ _id: teamId }, { $push: { members: newUser._id } });
 
     const team = await Team.findOne({ _id: teamId });
 
     // Send email to the new user
 
-    await sendTemplateEmail({
-      to: email,
-      name: firstName + " " + lastName,
-      templateId: 4,
-      params: {
-        userName: firstName + " " + lastName,
-        manager: manager.fullName,
-        password: userPassword,
-        time: moment(new Date()).format("DD MMM YYYY, hh:mm A"),
-      },
-    });
+    // await sendTemplateEmail({
+    //   to: email,
+    //   name: firstName + " " + lastName,
+    //   templateId: 4,
+    //   params: {
+    //     userName: firstName + " " + lastName,
+    //     manager: manager.fullName,
+    //     password: userPassword,
+    //     time: moment(new Date()).format("DD MMM YYYY, hh:mm A"),
+    //   },
+    // });
 
     return res.status(200).send({
       message: `User ${firstName} added successfully to ${team.name} team`,
