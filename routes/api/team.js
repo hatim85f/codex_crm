@@ -115,7 +115,7 @@ router.put("/:teamId/add-member", async (req, res) => {
   }
 });
 
-router.delete(":/teamId/remove-team", auth, async (req, res) => {
+router.delete("/:teamId/remove-team", auth, async (req, res) => {
   const { teamId } = req.params;
 
   try {
