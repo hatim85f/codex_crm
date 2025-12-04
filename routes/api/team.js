@@ -101,12 +101,27 @@ router.put("/:teamId/add-member", async (req, res) => {
         manager: manager.fullName,
         password: userPassword,
         time: moment(new Date()).format("DD MMM YYYY, hh:mm A"),
+        userEmail: email,
       },
     });
 
     return res.status(200).send({
       message: `User ${firstName} added successfully to ${team.name} team`,
     });
+  } catch (error) {
+    return res
+      .status(500)
+      .send({ error: "ERROR !", message: error.message || "Server Error" });
+  }
+});
+
+router.delete(":/teamId/remove-team", auth, async (req, res) => {
+  const { teamId } = req.params;
+
+  try {
+    await Team.deleteOne({ _id: teamId });
+
+    return res.status(200).send({ message: "Team removed successfully" });
   } catch (error) {
     return res
       .status(500)
