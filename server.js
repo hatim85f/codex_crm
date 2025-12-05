@@ -20,6 +20,7 @@ app.get("/", (__req, res) =>
 app.use("/api/users", require("./routes/api/users"));
 app.use("/api/auth", require("./routes/api/auth"));
 app.use("/api/teams", require("./routes/api/team"));
+app.use("/api/organization", require("./routes/api/organization"));
 
 // not found
 app.use((req, res, next) => {
