@@ -58,9 +58,9 @@ const OrganizationSchema = new Schema(
 
     // Public/social links (not API IDs)
     social: {
-      facebook: { type: String, trim: true },
-      instagram: { type: String, trim: true },
-      whatsapp: { type: String, trim: true }, // public phone (not phoneNumberId)
+      facebook: { type: Object },
+      instagram: { type: Object },
+      whatsapp: { type: Object }, // public phone (not phoneNumberId)
     },
 
     // Will be set after creating the admin user (optional for now)
