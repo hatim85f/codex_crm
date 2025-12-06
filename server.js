@@ -25,11 +25,6 @@ app.use("/api/teams", require("./routes/api/team"));
 app.use("/api/organization", require("./routes/api/organization"));
 app.use("/api/edits", require("./routes/api/editings"));
 
-// not found
-app.use((req, res, next) => {
-  res.status(404).json({ message: "Route not found" });
-});
-
 // error handler (so unhandled errors don’t crash silently)
 app.use((err, req, res, _next) => {
   console.error("Unhandled error:", err);
@@ -124,6 +119,11 @@ router.post("/webhook/whatsapp", async (req, res) => {
     console.error("🔥 Error in WhatsApp webhook:", error);
     return res.sendStatus(500);
   }
+});
+
+// not found
+app.use((req, res, next) => {
+  res.status(404).json({ message: "Route not found" });
 });
 
 const PORT = process.env.PORT || 5000;
