@@ -3,10 +3,12 @@ const Schema = mongoose.Schema;
 
 const WhatsAppSchema = new Schema(
   {
-    wabaId: { type: String, trim: true }, // WhatsApp Business Account ID
-    phoneNumberId: { type: String, trim: true }, // WhatsApp Phone Number ID
-    apiType: { type: String, enum: ["cloud", "onprem"], default: "cloud" },
-    status: { type: String, enum: ["inactive", "active"], default: "inactive" },
+    wabaId: String,
+    phoneNumberId: String,
+    displayPhoneNumber: String,
+    accessToken: String,
+    webhookVerifyToken: String,
+    enabled: { type: Boolean, default: false },
   },
   { _id: false }
 );
@@ -52,6 +54,7 @@ const OrganizationSchema = new Schema(
     website: { type: String, trim: true },
     logo: { type: String, trim: true },
     industry: { type: String, trim: true },
+    email: { type: String, trim: true },
 
     // Public/social links (not API IDs)
     social: {

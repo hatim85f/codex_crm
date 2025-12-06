@@ -13,6 +13,7 @@ router.use(cors());
 router.post("/create", async (req, res) => {
   const {
     organizationName,
+    organizationEmail,
     slug: rawSlug,
     address,
     phoneNumber,
@@ -67,6 +68,7 @@ router.post("/create", async (req, res) => {
     try {
       const newOrganization = new Organization({
         organizationName: organizationName.trim(),
+        email: organizationEmail ? organizationEmail.trim() : undefined,
         slug,
         address,
         phoneNumber,
