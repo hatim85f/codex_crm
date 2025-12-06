@@ -1,4 +1,6 @@
 const express = require("express");
+const router = express.Router();
+const Organization = require("./models/Organization");
 const connectDB = require("./config/db");
 const cors = require("cors");
 
