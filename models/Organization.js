@@ -58,8 +58,8 @@ const OrganizationSchema = new Schema(
 
     // Public/social links (not API IDs)
     social: {
-      facebook: { type: Object },
-      instagram: { type: Object },
+      facebook: { type: String },
+      instagram: { type: String },
       whatsapp: { type: Object }, // public phone (not phoneNumberId)
     },
 
