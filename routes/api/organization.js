@@ -106,7 +106,13 @@ router.put("/:orgId/social-links", auth, async (req, res) => {
 
     await Organization.updateOne(
       { _id: orgId },
-      { $addToSet: { social: { facebook, instagram, tiktok } } }
+      {
+        social: {
+          facebook: facebook || {},
+          instagram: instagram || {},
+          tiktok: tiktok || {},
+        },
+      }
     );
 
     return res.json({ message: "Social links updated successfully" });
