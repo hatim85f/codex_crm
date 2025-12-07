@@ -104,15 +104,17 @@ router.put("/:orgId/social-links", auth, async (req, res) => {
       return res.status(404).json({ message: "Organization not found" });
     }
 
+    const whatsapp = org.social.whatsapp || {};
+    const updatedSocial = {
+      facebook: facebook || whatsapp.facebook || {},
+      instagram: instagram || whatsapp.instagram || {},
+      tiktok: tiktok || whatsapp.tiktok || {},
+      whatsapp: whatsapp, // retain existing whatsapp settings
+    };
+
     await Organization.updateOne(
       { _id: orgId },
-      {
-        social: {
-          facebook: facebook || {},
-          instagram: instagram || {},
-          tiktok: tiktok || {},
-        },
-      }
+      { $set: { social: updatedSocial } }
     );
 
     return res.json({ message: "Social links updated successfully" });
