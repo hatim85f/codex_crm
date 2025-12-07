@@ -94,4 +94,27 @@ router.put("/:orgId/whatsapp-webhook", auth, async (req, res) => {
   }
 });
 
+router.put("/:orgId/social-links", auth, async (req, res) => {
+  const { orgId } = req.params;
+  const { facebook, instagram, tiktok } = req.body;
+
+  try {
+    const org = await Organization.findOne({ _id: orgId });
+    if (!org) {
+      return res.status(404).json({ message: "Organization not found" });
+    }
+
+    await Organization.updateOne(
+      { _id: orgId },
+      { $addToSet: { social: { facebook, instagram, tiktok } } }
+    );
+
+    return res.json({ message: "Social links updated successfully" });
+  } catch (error) {
+    return res
+      .status(500)
+      .send({ error: "ERROR !", message: error.message || "Server Error" });
+  }
+});
+
 module.exports = router;

@@ -60,6 +60,7 @@ const OrganizationSchema = new Schema(
     social: {
       facebook: { type: String },
       instagram: { type: String },
+      tiktok: { type: String },
       whatsapp: { type: Object }, // public phone (not phoneNumberId)
     },
 
