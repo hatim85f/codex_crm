@@ -8,6 +8,7 @@ const User = require("../../models/User");
 const ResetToken = require("../../models/ResetToken");
 const { sendTemplateEmail } = require("../../lib/brevo");
 const moment = require("moment");
+const auth = require("../../middleware/auth");
 
 // @route   POST api/auth/login
 // @desc    Authenticate user & get token
@@ -181,7 +182,9 @@ router.put("/:userId/update-profile", auth, async (req, res) => {
       { new: true }
     );
 
-    return res.status(200).send({ user: updatedUser });
+    return res
+      .status(200)
+      .send({ user: updatedUser, message: "Profile updated successfully." });
   } catch (error) {
     return res.status(500).send({
       error: "ERROR !",
