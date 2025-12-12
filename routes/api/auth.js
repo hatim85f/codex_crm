@@ -155,6 +155,41 @@ router.post("/check-reset-code", async (req, res) => {
   }
 });
 
+router.put("/:userId", auth, async (req, res) => {
+  const { userId } = req.params;
+  const { firstName, lastName, email, userPhone, profilePicture } = req.body;
+
+  try {
+    const user = await User.findOne({ _id: userId });
+
+    const updatedData = {
+      firstName: firstName || user.firstName,
+      lastName: lastName || user.lastName,
+      email: email || user.email,
+      userPhone: userPhone || user.userPhone,
+      profilePicture: profilePicture || user.profilePicture,
+      fullName: `${firstName || user.firstName} ${lastName || user.lastName}`,
+    };
+
+    const updatedUser = await User.updateMany(
+      {
+        _id: userId,
+      },
+      {
+        $set: updatedData,
+      },
+      { new: true }
+    );
+
+    return res.status(200).send({ user: updatedUser });
+  } catch (error) {
+    return res.status(500).send({
+      error: "ERROR !",
+      message: error.message || "Server Error",
+    });
+  }
+});
+
 router.put("/reset-password", async (req, rs) => {
   const { email, newPassword } = req.body;
 
