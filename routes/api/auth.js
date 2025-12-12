@@ -155,7 +155,7 @@ router.post("/check-reset-code", async (req, res) => {
   }
 });
 
-router.put("/:userId", auth, async (req, res) => {
+router.put("/:userId/update-profile", auth, async (req, res) => {
   const { userId } = req.params;
   const { firstName, lastName, email, userPhone, profilePicture } = req.body;
 
