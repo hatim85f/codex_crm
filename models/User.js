@@ -49,6 +49,18 @@ const UserSchema = Schema(
       required: true, // make true if every user must belong to an org
       index: true,
     },
+    projects: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "projects",
+      },
+    ],
+    assignedClients: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "clients",
+      },
+    ],
   },
   {
     timestamps: true,
