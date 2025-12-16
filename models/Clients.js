@@ -80,7 +80,11 @@ const ClientsSchema = Schema(
       required: true,
       enum: ["manual", "whatsapp", "facebook", "google"],
     },
-
+    handledBy: {
+      type: Schema.Types.ObjectId,
+      ref: "users",
+    },
+    // relations
     projects: [
       {
         type: Schema.Types.ObjectId,

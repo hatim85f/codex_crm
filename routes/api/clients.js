@@ -27,6 +27,7 @@ router.post("/add-client", auth, async (req, res) => {
     profilePicture,
     source,
     organizationId,
+    userId,
   } = req.body;
 
   try {
@@ -70,6 +71,7 @@ router.post("/add-client", auth, async (req, res) => {
       source,
       clientFor: organizationId,
       password: hashedPassword,
+      handledBy: userId,
       // mustChangePassword: true, // if you add it to schema
     });
 
