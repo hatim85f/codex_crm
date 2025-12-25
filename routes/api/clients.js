@@ -9,8 +9,21 @@ const auth = require("../../middleware/auth");
 const normalizeToE164 = require("../../helpers/normalizeToE164");
 const extractWhatsAppIdentity = require("../../helpers/extractWhatsAppIdentity");
 
-router.get("/", auth, async (req, res) => {
-  return res.status(200).json({ message: "Clients route works" });
+router.get("/:userId", auth, async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const clients = await Clients.find({ handledBy: userId }).sort({
+      createdAt: -1,
+    });
+
+    return res.status(200).json({ clients });
+  } catch (error) {
+    return res.status(500).send({
+      error: "Server Error",
+      message: "Please try again later." || error.message,
+    });
+  }
 });
 
 router.post("/add-client", auth, async (req, res) => {
