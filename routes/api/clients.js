@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { check, validationResult } = require("express-validator");
 const Clients = require("../../models/Clients");
+const User = require("../../models/User");
 const bcrypt = require("bcryptjs");
 
 const auth = require("../../middleware/auth");
@@ -13,11 +14,25 @@ router.get("/:userId", auth, async (req, res) => {
   const { userId } = req.params;
 
   try {
+    // Get the user's organization ID
+    const user = await User.findOne({ _id: userId }).select("organizationId");
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Get all clients under the same organization
+    const companyClients = await Clients.find({
+      clientFor: user.organizationId,
+    }).sort({
+      createdAt: -1,
+    });
+
     const clients = await Clients.find({ handledBy: userId }).sort({
       createdAt: -1,
     });
 
-    return res.status(200).json({ clients });
+    return res.status(200).json({ companyClients, clients });
   } catch (error) {
     return res.status(500).send({
       error: "Server Error",
