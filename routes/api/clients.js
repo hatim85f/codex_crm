@@ -72,7 +72,6 @@ router.post("/add-client", auth, async (req, res) => {
       clientFor: organizationId,
       password: hashedPassword,
       handledBy: userId,
-      // mustChangePassword: true, // if you add it to schema
     });
 
     await newClient.save();
