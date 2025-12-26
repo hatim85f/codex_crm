@@ -54,11 +54,12 @@ router.post("/add-client", auth, async (req, res) => {
     companyLogo,
     profilePicture,
     source,
-    organizationId,
     userId,
   } = req.body;
 
   try {
+    const user = await User.findOne({ _id: userId });
+
     const isClientExists = await Clients.findOne({ email });
     if (isClientExists) {
       return res
@@ -97,7 +98,7 @@ router.post("/add-client", auth, async (req, res) => {
       companyLogo,
       profilePicture,
       source,
-      clientFor: organizationId,
+      clientFor: user.organizationId,
       password: hashedPassword,
       handledBy: userId,
     });
