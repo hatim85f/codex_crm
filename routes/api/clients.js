@@ -9,6 +9,7 @@ const auth = require("../../middleware/auth");
 
 const normalizeToE164 = require("../../helpers/normalizeToE164");
 const extractWhatsAppIdentity = require("../../helpers/extractWhatsAppIdentity");
+const c = require("config");
 
 router.get("/:userId", auth, async (req, res) => {
   const { userId } = req.params;
@@ -32,7 +33,27 @@ router.get("/:userId", auth, async (req, res) => {
       createdAt: -1,
     });
 
-    return res.status(200).json({ companyClients, clients });
+    // based on createdAt, get the percentage of clients added in the last 30 days
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const clientsAddedLast30Days = await Clients.find({
+      clientFor: user.organizationId,
+      handledBy: userId,
+      createdAt: { $gte: thirtyDaysAgo },
+    });
+
+    const percentageAddedLast30Days =
+      (clientsAddedLast30Days.length / clients.length) * 100;
+
+    return res
+      .status(200)
+      .json({
+        companyClients,
+        clients,
+        clientsPercentage: percentageAddedLast30Days,
+      });
   } catch (error) {
     return res.status(500).send({
       error: "Server Error",
