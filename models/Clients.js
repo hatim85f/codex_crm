@@ -24,7 +24,6 @@ const ClientsSchema = Schema(
     },
     email: {
       type: String,
-      unique: true,
       required: true,
       lowercase: true,
       trim: true,
@@ -109,6 +108,13 @@ const ClientsSchema = Schema(
           type: String,
           required: false,
         },
+      },
+    ],
+    messages: [
+      {
+        senderId: { type: Schema.Types.ObjectId, ref: "users" || "clients" },
+        timestamp: { type: Date, default: Date.now },
+        content: { type: String },
       },
     ],
     quotations: [

@@ -9,6 +9,8 @@ const auth = require("../../middleware/auth");
 
 const normalizeToE164 = require("../../helpers/normalizeToE164");
 const extractWhatsAppIdentity = require("../../helpers/extractWhatsAppIdentity");
+const createOrGetClientFromWhatsApp = require("../../helpers/createOrGetClientFromWhatsApp");
+
 const c = require("config");
 
 router.get("/:userId", auth, async (req, res) => {
@@ -47,13 +49,11 @@ router.get("/:userId", auth, async (req, res) => {
     const percentageAddedLast30Days =
       (clientsAddedLast30Days.length / clients.length) * 100;
 
-    return res
-      .status(200)
-      .json({
-        companyClients,
-        clients,
-        clientsPercentage: percentageAddedLast30Days,
-      });
+    return res.status(200).json({
+      companyClients,
+      clients,
+      clientsPercentage: percentageAddedLast30Days,
+    });
   } catch (error) {
     return res.status(500).send({
       error: "Server Error",
@@ -81,7 +81,10 @@ router.post("/add-client", auth, async (req, res) => {
   try {
     const user = await User.findOne({ _id: userId });
 
-    const isClientExists = await Clients.findOne({ email });
+    const isClientExists = await Clients.findOne({
+      email,
+      clientFor: user.organizationId,
+    });
     if (isClientExists) {
       return res
         .status(409)
@@ -138,6 +141,27 @@ router.post("/add-client", auth, async (req, res) => {
       error: "ERROR!",
       message: error.message || "Server Error",
     });
+  }
+});
+
+router.post("/whatsapp/test-ad-inbound", auth, async (req, res) => {
+  const { userId, payload, countryCode } = req.body;
+
+  try {
+    const user = await User.findById(userId).select("organizationId");
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // payload should be: changes[0].value (ONLY)
+    const result = await createOrGetClientFromWhatsApp({
+      orgId: user.organizationId,
+      handledBy: userId,
+      value: payload,
+      countryCode: countryCode || "AE",
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({ error: "ERROR!", message: error.message });
   }
 });
 

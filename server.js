@@ -29,6 +29,7 @@ app.use("/api/teams", require("./routes/api/team"));
 app.use("/api/organization", require("./routes/api/organization"));
 app.use("/api/edits", require("./routes/api/editings"));
 app.use("/api/clients", require("./routes/api/clients"));
+app.use("/api/whatsapp", require("./routes/api/whatsappWebhook"));
 
 // ====== WHATSAPP WEBHOOK (GLOBAL, FOR ALL ORGS) ======
 const WHATSAPP_VERIFY_TOKEN =
