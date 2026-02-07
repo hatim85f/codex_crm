@@ -54,6 +54,8 @@ app.get("/api/webhook/whatsapp", (req, res) => {
 app.post("/api/webhook/whatsapp", async (req, res) => {
   try {
     console.log("✅ WA POST HIT", new Date().toISOString());
+    console.log("BODY:", JSON.stringify(req.body));
+
     const body = req.body;
     console.dir(body, { depth: null });
 
