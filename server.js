@@ -105,6 +105,9 @@ app.post("/api/webhook/whatsapp", async (req, res) => {
       const type = msg.type;
       const text = msg.text && msg.text.body;
 
+      console.log("✅ WA POST HIT FROM META", new Date().toISOString());
+      console.log("BODY:", JSON.stringify(req.body));
+
       console.log("📩 Incoming message:", {
         orgId: org._id.toString(),
         from,
