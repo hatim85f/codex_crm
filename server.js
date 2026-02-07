@@ -19,7 +19,7 @@ connectDB();
 
 // ====== BASIC HEALTH CHECK ======
 app.get("/", (__req, res) =>
-  res.status(200).send("Codex CRM API is running...")
+  res.status(200).send("Codex CRM API is running..."),
 );
 
 // ====== MAIN ROUTES ======
@@ -53,12 +53,16 @@ app.get("/api/webhook/whatsapp", (req, res) => {
 // ✅ 2) RECEIVE WHATSAPP MESSAGES (Meta sends POST for every update)
 app.post("/api/webhook/whatsapp", async (req, res) => {
   try {
+    console.log("✅ WA POST HIT", new Date().toISOString());
     const body = req.body;
     console.dir(body, { depth: null });
 
     const entry = body.entry && body.entry[0];
     const change = entry && entry.changes && entry.changes[0];
     const value = change && change.value;
+
+    console.log("phone_number_id:", value?.metadata?.phone_number_id);
+    console.log("from:", value?.messages?.[0]?.from);
 
     if (!value || !value.metadata) {
       console.log("⚠️ No value/metadata in webhook payload");
@@ -87,7 +91,7 @@ app.post("/api/webhook/whatsapp", async (req, res) => {
     console.log(
       `✅ Webhook belongs to org ${org._id.toString()} (${
         org.organizationName || "N/A"
-      }) | ${displayPhoneNumber}`
+      }) | ${displayPhoneNumber}`,
     );
 
     const messages = value.messages || [];

@@ -108,6 +108,29 @@ router.post("/add-client", auth, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(userPassword, 10);
 
+    // customer  ID generation logic
+    const date = new Date();
+    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const dd = String(date.getDate()).padStart(2, "0");
+    const yy = String(date.getFullYear()).slice(-2);
+
+    const lastClient = await Clients.findOne({})
+      .sort({ createdAt: -1 })
+      .select("customerId");
+
+    let newCustomerIdNumber = 51; // starting number
+    if (lastClient && lastClient.customerId) {
+      const lastCustomerId = lastClient.customerId;
+
+      const lastNumber = parseInt(lastCustomerId.slice(-4), 10);
+      if (!isNaN(lastNumber)) {
+        newCustomerIdNumber = lastNumber + 1;
+      }
+    }
+    const newCustomerId = `${mm}${dd}${yy}${String(
+      newCustomerIdNumber
+    ).padStart(4, "0")}`;
+
     const newClient = new Clients({
       firstName,
       lastName,

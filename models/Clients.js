@@ -17,6 +17,11 @@ const ClientsSchema = Schema(
         return this.firstName + " " + this.lastName;
       },
     },
+    customerId: {
+      type: String,
+      required: true,
+      unique: true,
+    },
     status: {
       type: String,
       enum: ["active", "inactive"],
