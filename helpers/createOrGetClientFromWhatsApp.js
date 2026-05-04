@@ -51,7 +51,16 @@ const createOrGetClientFromWhatsApp = async ({
   const rawPass = `${waId}@1234`;
   const hashedPassword = await bcrypt.hash(rawPass, 10);
 
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const yy = String(now.getFullYear()).slice(-2);
+  const lastClient = await Clients.findOne({}).sort({ createdAt: -1 }).select("customerId");
+  const lastNum = lastClient?.customerId ? parseInt(lastClient.customerId.slice(-4), 10) : 50;
+  const customerId = `${mm}${dd}${yy}${String((isNaN(lastNum) ? 50 : lastNum) + 1).padStart(4, "0")}`;
+
   client = new Clients({
+    customerId,
     firstName,
     lastName,
     email: makeWaEmail(waId, orgId),

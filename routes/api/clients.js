@@ -47,7 +47,9 @@ router.get("/:userId", auth, async (req, res) => {
     });
 
     const percentageAddedLast30Days =
-      (clientsAddedLast30Days.length / clients.length) * 100;
+      clients.length > 0
+        ? (clientsAddedLast30Days.length / clients.length) * 100
+        : 0;
 
     return res.status(200).json({
       companyClients,

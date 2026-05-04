@@ -32,6 +32,8 @@ app.use("/api/clients", require("./routes/api/clients"));
 app.use("/api/whatsapp", require("./routes/api/whatsappWebhook"));
 
 // ====== WHATSAPP WEBHOOK (GLOBAL, FOR ALL ORGS) ======
+const createOrGetClientFromWhatsApp = require("./helpers/createOrGetClientFromWhatsApp");
+
 const WHATSAPP_VERIFY_TOKEN =
   process.env.WHATSAPP_VERIFY_TOKEN || "codex-crm-whatsapp";
 
@@ -81,9 +83,9 @@ app.post("/api/webhook/whatsapp", async (req, res) => {
 
     // 🔍 Multi-tenant: find org by phoneNumberId
     const org = await Organization.findOne({
-      "social.whatsapp.phoneNumberId": phoneNumberId.toString(),
-      "social.whatsapp.enabled": true,
-    });
+      "leadIntegrations.whatsapp.phoneNumberId": phoneNumberId.toString(),
+      "leadIntegrations.whatsapp.enabled": true,
+    }).select("_id organizationName ownerId leadIntegrations");
 
     if (!org) {
       console.log("❌ No organization found for phoneNumberId:", phoneNumberId);
@@ -96,32 +98,31 @@ app.post("/api/webhook/whatsapp", async (req, res) => {
       }) | ${displayPhoneNumber}`,
     );
 
-    const messages = value.messages || [];
-
-    for (const msg of messages) {
-      const from = msg.from; // customer phone
-      const msgId = msg.id;
-      const timestamp = msg.timestamp;
-      const type = msg.type;
-      const text = msg.text && msg.text.body;
-
-      console.log("✅ WA POST HIT FROM META", new Date().toISOString());
-      console.log("BODY:", JSON.stringify(req.body));
-
-      console.log("📩 Incoming message:", {
-        orgId: org._id.toString(),
-        from,
-        msgId,
-        type,
-        text,
-        timestamp,
-      });
-
-      // TODO (later):
-      // - Save to Message collection with orgId
-      // - Link to Conversation per customer
-      // - Emit socket / push notification to admins
+    if (!value.messages || !value.messages.length) {
+      return res.sendStatus(200);
     }
+
+    const handledBy = org.ownerId || null;
+    if (!handledBy) {
+      console.log("⚠️ No ownerId on org, cannot assign client:", org._id);
+      return res.sendStatus(200);
+    }
+
+    const countryCode =
+      org.leadIntegrations?.whatsapp?.countryCode || "AE";
+
+    const { client, isNew } = await createOrGetClientFromWhatsApp({
+      orgId: org._id,
+      handledBy,
+      value,
+      countryCode,
+    });
+
+    console.log(
+      isNew
+        ? `✅ New client created: ${client._id} (${client.firstName} ${client.lastName})`
+        : `ℹ️ Existing client matched: ${client._id}`,
+    );
 
     // Always 200 so Meta doesn't retry
     return res.sendStatus(200);

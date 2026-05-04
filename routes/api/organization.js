@@ -22,9 +22,9 @@ router.put("/:orgId", auth, async (req, res) => {
   const updateData = req.body;
 
   try {
-    const updatedOrganization = await Organization.updateMany(
+    const updatedOrganization = await Organization.findByIdAndUpdate(
       orgId,
-      updateData,
+      { $set: updateData },
       { new: true }
     );
 
@@ -65,27 +65,24 @@ router.put("/:orgId/whatsapp-webhook", auth, async (req, res) => {
       return res.status(404).json({ message: "Organization not found" });
     }
 
-    // make sure social exists
-    if (!org.social) {
-      org.social = {};
+    if (!org.leadIntegrations) {
+      org.leadIntegrations = {};
     }
 
-    // save whatsapp settings under org.social.whatsapp
-    org.social.whatsapp = {
+    org.leadIntegrations.whatsapp = {
       wabaId: wabaId.toString(),
       phoneNumberId: phoneNumberId.toString(),
       displayPhoneNumber,
       accessToken,
       webhookVerifyToken,
       enabled: true,
-      updatedAt: new Date(),
     };
 
     await org.save();
 
     return res.json({
       message: "WhatsApp settings saved successfully",
-      whatsapp: org.social.whatsapp,
+      whatsapp: org.leadIntegrations.whatsapp,
     });
   } catch (error) {
     return res
