@@ -130,7 +130,7 @@ router.post("/add-client", auth, async (req, res) => {
       }
     }
     const newCustomerId = `${mm}${dd}${yy}${String(
-      newCustomerIdNumber
+      newCustomerIdNumber,
     ).padStart(4, "0")}`;
 
     const newClient = new Clients({
@@ -150,6 +150,7 @@ router.post("/add-client", auth, async (req, res) => {
       clientFor: user.organizationId,
       password: hashedPassword,
       handledBy: userId,
+      customerId: newCustomerId,
     });
 
     await newClient.save();
