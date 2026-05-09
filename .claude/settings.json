@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(heroku config:set CLOUDINARY_CLOUD_NAME=dt3u7d1tv CLOUDINARY_API_KEY=936414535596597 CLOUDINARY_API_SECRET=Q0OqNezmdv9-eBe9i7eJuKMuvBs CLOUDINARY_UPLOAD_PRESET=Codex-CRM --app codex-crm 2>&1)"
+    ]
+  }
+}
