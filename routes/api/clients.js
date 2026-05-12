@@ -47,9 +47,9 @@ router.get("/:userId", auth, async (req, res) => {
       {
         $lookup: {
           from: "users",
-          let: { assignedById: { $ifNull: ["$assignedBy", "$handledBy"] } },
+          let: { assignedByUserId: { $ifNull: ["$assignedBy", "$handledBy"] } },
           pipeline: [
-            { $match: { $expr: { $eq: ["$_id", "$$assignedById"] } } },
+            { $match: { $expr: { $eq: ["$_id", "$$assignedByUserId"] } } },
             {
               $project: {
                 firstName: 1,
@@ -96,7 +96,7 @@ router.get("/:userId", auth, async (req, res) => {
       {
         $addFields: {
           handledById: "$handledBy",
-          assignedById: { $ifNull: ["$assignedBy", "$handledBy"] },
+          assignedTo: { $ifNull: ["$assignedTo", "$assignedBy", "$handledBy"] },
           createdById: { $ifNull: ["$createdBy", "$handledBy"] },
           clientForId: "$clientFor",
           handledBy: {
@@ -309,6 +309,7 @@ router.post("/add-client", auth, async (req, res) => {
       clientFor: user.organizationId,
       password: hashedPassword,
       handledBy: userId,
+      assignedTo: userId,
       assignedBy: userId,
       createdBy: userId,
       customerId: newCustomerId,
