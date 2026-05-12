@@ -38,8 +38,6 @@ router.get("/:userId", auth, async (req, res) => {
                 firstName: 1,
                 lastName: 1,
                 fullName: 1,
-                email: 1,
-                profilePicture: 1,
               },
             },
           ],
@@ -55,8 +53,6 @@ router.get("/:userId", auth, async (req, res) => {
             {
               $project: {
                 organizationName: 1,
-                slug: 1,
-                logo: 1,
               },
             },
           ],
@@ -71,27 +67,20 @@ router.get("/:userId", auth, async (req, res) => {
             $let: {
               vars: { user: { $arrayElemAt: ["$handledByUser", 0] } },
               in: {
-                _id: "$$user._id",
-                firstName: "$$user.firstName",
-                lastName: "$$user.lastName",
-                fullName: {
-                  $ifNull: [
-                    "$$user.fullName",
-                    {
-                      $trim: {
-                        input: {
-                          $concat: [
-                            { $ifNull: ["$$user.firstName", ""] },
-                            " ",
-                            { $ifNull: ["$$user.lastName", ""] },
-                          ],
-                        },
+                $ifNull: [
+                  "$$user.fullName",
+                  {
+                    $trim: {
+                      input: {
+                        $concat: [
+                          { $ifNull: ["$$user.firstName", ""] },
+                          " ",
+                          { $ifNull: ["$$user.lastName", ""] },
+                        ],
                       },
                     },
-                  ],
-                },
-                email: "$$user.email",
-                profilePicture: "$$user.profilePicture",
+                  },
+                ],
               },
             },
           },
@@ -100,12 +89,7 @@ router.get("/:userId", auth, async (req, res) => {
               vars: {
                 organization: { $arrayElemAt: ["$clientForOrganization", 0] },
               },
-              in: {
-                _id: "$$organization._id",
-                organizationName: "$$organization.organizationName",
-                slug: "$$organization.slug",
-                logo: "$$organization.logo",
-              },
+              in: "$$organization.organizationName",
             },
           },
         },
