@@ -64,6 +64,27 @@ router.get("/:userId", auth, async (req, res) => {
       {
         $lookup: {
           from: "users",
+          let: {
+            assignedToUserId: {
+              $ifNull: ["$assignedTo", "$assignedBy", "$handledBy"],
+            },
+          },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$_id", "$$assignedToUserId"] } } },
+            {
+              $project: {
+                firstName: 1,
+                lastName: 1,
+                fullName: 1,
+              },
+            },
+          ],
+          as: "assignedToUser",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
           let: { createdById: { $ifNull: ["$createdBy", "$handledBy"] } },
           pipeline: [
             { $match: { $expr: { $eq: ["$_id", "$$createdById"] } } },
@@ -96,7 +117,7 @@ router.get("/:userId", auth, async (req, res) => {
       {
         $addFields: {
           handledById: "$handledBy",
-          assignedTo: { $ifNull: ["$assignedTo", "$assignedBy", "$handledBy"] },
+          assignedToId: { $ifNull: ["$assignedTo", "$assignedBy", "$handledBy"] },
           createdById: { $ifNull: ["$createdBy", "$handledBy"] },
           clientForId: "$clientFor",
           handledBy: {
@@ -123,6 +144,27 @@ router.get("/:userId", auth, async (req, res) => {
           assignedBy: {
             $let: {
               vars: { user: { $arrayElemAt: ["$assignedByUser", 0] } },
+              in: {
+                $ifNull: [
+                  "$$user.fullName",
+                  {
+                    $trim: {
+                      input: {
+                        $concat: [
+                          { $ifNull: ["$$user.firstName", ""] },
+                          " ",
+                          { $ifNull: ["$$user.lastName", ""] },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          assignedTo: {
+            $let: {
+              vars: { user: { $arrayElemAt: ["$assignedToUser", 0] } },
               in: {
                 $ifNull: [
                   "$$user.fullName",
@@ -177,6 +219,7 @@ router.get("/:userId", auth, async (req, res) => {
           password: 0,
           handledByUser: 0,
           assignedByUser: 0,
+          assignedToUser: 0,
           createdByUser: 0,
           clientForOrganization: 0,
         },
