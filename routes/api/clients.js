@@ -24,31 +24,126 @@ router.get("/:userId", auth, async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Get all clients under the same organization
-    const companyClients = await Clients.find({
-      clientFor: user.organizationId,
-    }).sort({
-      createdAt: -1,
-    });
+    const clientsWithNamesPipeline = (match) => [
+      { $match: match },
+      { $sort: { createdAt: -1 } },
+      {
+        $lookup: {
+          from: "users",
+          let: { handledById: "$handledBy" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$_id", "$$handledById"] } } },
+            {
+              $project: {
+                firstName: 1,
+                lastName: 1,
+                fullName: 1,
+                email: 1,
+                profilePicture: 1,
+              },
+            },
+          ],
+          as: "handledByUser",
+        },
+      },
+      {
+        $lookup: {
+          from: "organizations",
+          let: { organizationId: "$clientFor" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$_id", "$$organizationId"] } } },
+            {
+              $project: {
+                organizationName: 1,
+                slug: 1,
+                logo: 1,
+              },
+            },
+          ],
+          as: "clientForOrganization",
+        },
+      },
+      {
+        $addFields: {
+          handledById: "$handledBy",
+          clientForId: "$clientFor",
+          handledBy: {
+            $let: {
+              vars: { user: { $arrayElemAt: ["$handledByUser", 0] } },
+              in: {
+                _id: "$$user._id",
+                firstName: "$$user.firstName",
+                lastName: "$$user.lastName",
+                fullName: {
+                  $ifNull: [
+                    "$$user.fullName",
+                    {
+                      $trim: {
+                        input: {
+                          $concat: [
+                            { $ifNull: ["$$user.firstName", ""] },
+                            " ",
+                            { $ifNull: ["$$user.lastName", ""] },
+                          ],
+                        },
+                      },
+                    },
+                  ],
+                },
+                email: "$$user.email",
+                profilePicture: "$$user.profilePicture",
+              },
+            },
+          },
+          clientFor: {
+            $let: {
+              vars: {
+                organization: { $arrayElemAt: ["$clientForOrganization", 0] },
+              },
+              in: {
+                _id: "$$organization._id",
+                organizationName: "$$organization.organizationName",
+                slug: "$$organization.slug",
+                logo: "$$organization.logo",
+              },
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          password: 0,
+          handledByUser: 0,
+          clientForOrganization: 0,
+        },
+      },
+    ];
 
-    const clients = await Clients.find({ handledBy: userId }).sort({
-      createdAt: -1,
-    });
+    // Get all clients under the same organization
+    const companyClients = await Clients.aggregate(
+      clientsWithNamesPipeline({
+        clientFor: user.organizationId,
+      })
+    );
+
+    const clients = await Clients.aggregate(
+      clientsWithNamesPipeline({ handledBy: user._id })
+    );
 
     // based on createdAt, get the percentage of clients added in the last 30 days
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const clientsAddedLast30Days = await Clients.find({
+    const clientsAddedLast30Days = await Clients.countDocuments({
       clientFor: user.organizationId,
-      handledBy: userId,
+      handledBy: user._id,
       createdAt: { $gte: thirtyDaysAgo },
     });
 
     const percentageAddedLast30Days =
       clients.length > 0
-        ? (clientsAddedLast30Days.length / clients.length) * 100
+        ? (clientsAddedLast30Days / clients.length) * 100
         : 0;
 
     return res.status(200).json({
@@ -167,6 +262,79 @@ router.post("/add-client", auth, async (req, res) => {
       error: "ERROR!",
       message: error.message || "Server Error",
     });
+  }
+});
+
+router.put("/:clientId", auth, async (req, res) => {
+  const { clientId } = req.params;
+  const {
+    firstName,
+    lastName,
+    email,
+    phone,
+    whatsAppNumber,
+    country,
+    countryCode,
+    companyName,
+    companyLogo,
+    profilePicture,
+    source,
+    assignedTo,
+    tags,
+  } = req.body;
+
+  try {
+    const client = await Clients.findById(clientId);
+    if (!client) {
+      return res.status(404).json({ error: "Client not found" });
+    }
+
+    const updatedFields = {};
+
+    if (firstName !== undefined) updatedFields.firstName = firstName;
+    if (lastName !== undefined) updatedFields.lastName = lastName;
+    if (email !== undefined) updatedFields.email = email;
+    if (companyName !== undefined) updatedFields.companyName = companyName;
+    if (companyLogo !== undefined) updatedFields.companyLogo = companyLogo;
+    if (profilePicture !== undefined) updatedFields.profilePicture = profilePicture;
+    if (source !== undefined) updatedFields.source = source;
+    if (assignedTo !== undefined) updatedFields.assignedTo = assignedTo;
+    if (tags !== undefined) updatedFields.tags = tags;
+    if (country !== undefined) updatedFields.country = country;
+
+    if (phone !== undefined) {
+      const code = countryCode || client.country || "AE";
+      const phoneE164 = normalizeToE164(phone, code);
+      if (!phoneE164) return res.status(400).json({ error: "Invalid phone number" });
+      updatedFields.phone = phone;
+      updatedFields.phoneE164 = phoneE164;
+    }
+
+    if (whatsAppNumber !== undefined) {
+      const code = countryCode || client.country || "AE";
+      const whatsAppE164 = normalizeToE164(whatsAppNumber, code);
+      if (!whatsAppE164) return res.status(400).json({ error: "Invalid WhatsApp number" });
+      updatedFields.whatsAppNumber = whatsAppNumber;
+      updatedFields.whatsAppE164 = whatsAppE164;
+      updatedFields.waId = whatsAppE164.replace("+", "");
+    }
+
+    if (firstName !== undefined || lastName !== undefined) {
+      updatedFields.displayName = `${firstName || client.firstName} ${lastName || client.lastName}`;
+    }
+
+    const updatedClient = await Clients.findByIdAndUpdate(
+      clientId,
+      { $set: updatedFields },
+      { new: true }
+    );
+
+    return res.status(200).json({ client: updatedClient });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: "Duplicate value", details: error.keyValue });
+    }
+    return res.status(500).json({ error: "Server Error", message: error.message });
   }
 });
 

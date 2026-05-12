@@ -161,25 +161,26 @@ router.put("/:userId/update-profile", auth, async (req, res) => {
   const { firstName, lastName, email, userPhone, profilePicture } = req.body;
 
   try {
-    const user = await User.findOne({ _id: userId });
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).send({ error: "ERROR !", message: "User not found." });
+    }
 
-    const updatedData = {
-      firstName: firstName || user.firstName,
-      lastName: lastName || user.lastName,
-      email: email || user.email,
-      userPhone: userPhone || user.userPhone,
-      profilePicture: profilePicture || user.profilePicture,
-      fullName: `${firstName || user.firstName} ${lastName || user.lastName}`,
-    };
+    const updatedFields = {};
+    if (firstName !== undefined) updatedFields.firstName = firstName;
+    if (lastName !== undefined) updatedFields.lastName = lastName;
+    if (email !== undefined) updatedFields.email = email;
+    if (userPhone !== undefined) updatedFields.userPhone = userPhone;
+    if (profilePicture !== undefined) updatedFields.profilePicture = profilePicture;
 
-    const updatedUser = await User.updateMany(
-      {
-        _id: userId,
-      },
-      {
-        $set: updatedData,
-      },
-      { new: true }
+    const resolvedFirst = firstName ?? user.firstName;
+    const resolvedLast = lastName ?? user.lastName;
+    updatedFields.fullName = `${resolvedFirst} ${resolvedLast}`;
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: updatedFields },
+      { new: true, select: "-password" }
     );
 
     return res
