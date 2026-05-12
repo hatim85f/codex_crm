@@ -73,6 +73,7 @@ const createOrGetClientFromWhatsApp = async ({
     password: hashedPassword,
     source: "whatsapp", // ✅ must match enum
     handledBy,
+    assignedBy: handledBy,
     createdBy: handledBy, // optional but useful
     clientFor: orgId,
   });

@@ -140,6 +140,7 @@ const ClientsSchema = Schema(
     // ✅ light CRM extras
     tags: { type: [String], default: [] },
     assignedTo: { type: Schema.Types.ObjectId, ref: "users" },
+    assignedBy: { type: Schema.Types.ObjectId, ref: "users" },
     // ✅ who created it manually (useful later)
     createdBy: { type: Schema.Types.ObjectId, ref: "users" },
     clientFor: {

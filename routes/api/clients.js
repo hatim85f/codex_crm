@@ -46,6 +46,40 @@ router.get("/:userId", auth, async (req, res) => {
       },
       {
         $lookup: {
+          from: "users",
+          let: { assignedById: { $ifNull: ["$assignedBy", "$handledBy"] } },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$_id", "$$assignedById"] } } },
+            {
+              $project: {
+                firstName: 1,
+                lastName: 1,
+                fullName: 1,
+              },
+            },
+          ],
+          as: "assignedByUser",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          let: { createdById: { $ifNull: ["$createdBy", "$handledBy"] } },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$_id", "$$createdById"] } } },
+            {
+              $project: {
+                firstName: 1,
+                lastName: 1,
+                fullName: 1,
+              },
+            },
+          ],
+          as: "createdByUser",
+        },
+      },
+      {
+        $lookup: {
           from: "organizations",
           let: { organizationId: "$clientFor" },
           pipeline: [
@@ -62,10 +96,54 @@ router.get("/:userId", auth, async (req, res) => {
       {
         $addFields: {
           handledById: "$handledBy",
+          assignedById: { $ifNull: ["$assignedBy", "$handledBy"] },
+          createdById: { $ifNull: ["$createdBy", "$handledBy"] },
           clientForId: "$clientFor",
           handledBy: {
             $let: {
               vars: { user: { $arrayElemAt: ["$handledByUser", 0] } },
+              in: {
+                $ifNull: [
+                  "$$user.fullName",
+                  {
+                    $trim: {
+                      input: {
+                        $concat: [
+                          { $ifNull: ["$$user.firstName", ""] },
+                          " ",
+                          { $ifNull: ["$$user.lastName", ""] },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          assignedBy: {
+            $let: {
+              vars: { user: { $arrayElemAt: ["$assignedByUser", 0] } },
+              in: {
+                $ifNull: [
+                  "$$user.fullName",
+                  {
+                    $trim: {
+                      input: {
+                        $concat: [
+                          { $ifNull: ["$$user.firstName", ""] },
+                          " ",
+                          { $ifNull: ["$$user.lastName", ""] },
+                        ],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          createdBy: {
+            $let: {
+              vars: { user: { $arrayElemAt: ["$createdByUser", 0] } },
               in: {
                 $ifNull: [
                   "$$user.fullName",
@@ -98,6 +176,8 @@ router.get("/:userId", auth, async (req, res) => {
         $project: {
           password: 0,
           handledByUser: 0,
+          assignedByUser: 0,
+          createdByUser: 0,
           clientForOrganization: 0,
         },
       },
@@ -229,6 +309,8 @@ router.post("/add-client", auth, async (req, res) => {
       clientFor: user.organizationId,
       password: hashedPassword,
       handledBy: userId,
+      assignedBy: userId,
+      createdBy: userId,
       customerId: newCustomerId,
     });
 
