@@ -6,11 +6,17 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "dev": "node server.js",
+    "seed:owner": "node scripts/seed-owner.js",
     "test:db": "node scripts/test-db-connection.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "config": "^3.3.12",
+    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.19.2"
   }
 }
