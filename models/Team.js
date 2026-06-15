@@ -15,6 +15,7 @@ const MemberSchema = new Schema(
 const TeamSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
+    organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true },
     type: { type: String, default: "general" },
     department: { type: String, default: "" },
     description: { type: String, default: "" },

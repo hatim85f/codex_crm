@@ -5,15 +5,24 @@ const bcrypt = require("bcryptjs");
 const connectDB = require("../config/db");
 const User = require("../models/User");
 const Team = require("../models/Team");
+const Organization = require("../models/Organization");
 
+const ORG = {
+  name: "Codex FZE Technology",
+  slug: "codex-fze",
+  logo: "", // set via the app (Cloudinary) or here as a secure_url
+  status: "active",
+};
+
+// Credentials come from .env (gitignored) — never hard-code secrets in source.
 const OWNER = {
-  name: "Hatim Fayez",
-  email: "hatim.fayez@codex-fze.com",
+  name: process.env.SEED_OWNER_NAME || "Hatim Fayez",
+  email: process.env.SEED_OWNER_EMAIL || "owner@example.com",
   phone: "",
   role: "owner_admin",
   userType: "internal",
   status: "active",
-  password: "hatim@123$",
+  password: process.env.SEED_OWNER_PASSWORD,
 };
 
 const DEFAULT_TEAMS = [
@@ -23,13 +32,27 @@ const DEFAULT_TEAMS = [
 ];
 
 const run = async () => {
+  if (!OWNER.password) {
+    console.error("Set SEED_OWNER_PASSWORD (and SEED_OWNER_EMAIL) in .env before seeding.");
+    process.exit(1);
+  }
   await connectDB();
 
-  // Owner (idempotent upsert)
+  // 1) Organization (tenant)
+  let org = await Organization.findOne({ slug: ORG.slug });
+  if (!org) {
+    org = await Organization.create(ORG);
+    console.log(`Created organization: ${org.name} (${org._id})`);
+  } else {
+    console.log(`Organization exists: ${org.name} (${org._id})`);
+  }
+
+  // 2) Owner (idempotent) linked to the org
   const passwordHash = await bcrypt.hash(OWNER.password, 10);
   let owner = await User.findOne({ email: OWNER.email }).select("+passwordHash");
   if (owner) {
     owner.name = OWNER.name;
+    owner.organization = org._id;
     owner.role = OWNER.role;
     owner.userType = OWNER.userType;
     owner.status = OWNER.status;
@@ -39,6 +62,7 @@ const run = async () => {
   } else {
     owner = await User.create({
       name: OWNER.name,
+      organization: org._id,
       email: OWNER.email,
       phone: OWNER.phone,
       role: OWNER.role,
@@ -49,14 +73,15 @@ const run = async () => {
     console.log(`Created owner: ${owner.email} (${owner._id})`);
   }
 
-  // Default general teams (idempotent)
+  // 3) Default general teams (scoped to the org)
   for (const t of DEFAULT_TEAMS) {
-    const existing = await Team.findOne({ name: t.name });
+    const existing = await Team.findOne({ name: t.name, organization: org._id });
     if (existing) {
       console.log(`Team exists: ${t.name}`);
     } else {
       const team = await Team.create({
         name: t.name,
+        organization: org._id,
         type: "general",
         department: t.department,
         status: "active",

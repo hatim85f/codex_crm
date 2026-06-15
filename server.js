@@ -17,6 +17,7 @@ app.get("/api/health", (req, res) => res.json({ ok: true, service: "codex-crm-ap
 app.use("/api/auth", require("./routes/api/auth"));
 app.use("/api/users", require("./routes/api/users"));
 app.use("/api/teams", require("./routes/api/team"));
+app.use("/api/organizations", require("./routes/api/organization"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

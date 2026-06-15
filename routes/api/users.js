@@ -32,6 +32,7 @@ router.post("/", requireRole("owner_admin", "admin"), async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({
       name,
+      organization: req.user.organization, // tenant scope
       email,
       phone: phone || "",
       role,
@@ -52,7 +53,7 @@ router.post("/", requireRole("owner_admin", "admin"), async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { role, status, search } = req.query;
-    const query = {};
+    const query = { organization: req.user.organization }; // tenant scope
     if (role) query.role = role;
     if (status) query.status = status;
     if (search) {
@@ -73,7 +74,9 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const user = await User.findById(req.params.id).populate("generalTeams", "name department");
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user || String(user.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "User not found" });
+    }
     return res.json(user);
   } catch (err) {
     console.error("get user error:", err.message);
@@ -85,7 +88,9 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", requireRole("owner_admin", "admin"), async (req, res) => {
   try {
     const target = await User.findById(req.params.id);
-    if (!target) return res.status(404).json({ message: "User not found" });
+    if (!target || String(target.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
     // admins cannot modify owner_admin users
     if (req.user.role === "admin" && target.role === "owner_admin") {
@@ -129,7 +134,9 @@ router.patch("/:id/status", requireRole("owner_admin", "admin"), async (req, res
       return res.status(400).json({ message: "status must be 'active' or 'inactive'" });
     }
     const target = await User.findById(req.params.id);
-    if (!target) return res.status(404).json({ message: "User not found" });
+    if (!target || String(target.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "User not found" });
+    }
     if (req.user.role === "admin" && target.role === "owner_admin") {
       return res.status(403).json({ message: "Admins cannot modify owner_admin users" });
     }

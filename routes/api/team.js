@@ -20,6 +20,7 @@ router.post("/", requireRole("owner_admin", "admin"), async (req, res) => {
 
     const team = await Team.create({
       name,
+      organization: req.user.organization, // tenant scope
       type: type || "general",
       department: department || "",
       description: description || "",
@@ -46,7 +47,9 @@ router.post("/", requireRole("owner_admin", "admin"), async (req, res) => {
 // GET /api/teams
 router.get("/", async (req, res) => {
   try {
-    const teams = await populateTeam(Team.find({})).sort({ createdAt: -1 });
+    const teams = await populateTeam(
+      Team.find({ organization: req.user.organization })
+    ).sort({ createdAt: -1 });
     return res.json(teams);
   } catch (err) {
     console.error("list teams error:", err.message);
@@ -58,7 +61,9 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const team = await populateTeam(Team.findById(req.params.id));
-    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (!team || String(team.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "Team not found" });
+    }
     return res.json(team);
   } catch (err) {
     console.error("get team error:", err.message);
@@ -71,7 +76,9 @@ router.put("/:id", requireRole("owner_admin", "admin"), async (req, res) => {
   try {
     const { name, department, description, status, teamLeaderId } = req.body || {};
     const team = await Team.findById(req.params.id);
-    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (!team || String(team.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "Team not found" });
+    }
 
     if (name !== undefined) team.name = name;
     if (department !== undefined) team.department = department;
@@ -95,8 +102,8 @@ router.patch("/:id/status", requireRole("owner_admin", "admin"), async (req, res
     if (!["active", "inactive"].includes(status)) {
       return res.status(400).json({ message: "status must be 'active' or 'inactive'" });
     }
-    const team = await Team.findByIdAndUpdate(
-      req.params.id,
+    const team = await Team.findOneAndUpdate(
+      { _id: req.params.id, organization: req.user.organization },
       { status },
       { new: true }
     );
@@ -115,7 +122,9 @@ router.post("/:id/members", requireRole("owner_admin", "admin"), async (req, res
     if (!userId) return res.status(400).json({ message: "userId is required" });
 
     const team = await Team.findById(req.params.id);
-    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (!team || String(team.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "Team not found" });
+    }
 
     const already = team.members.some((m) => String(m.userId) === String(userId));
     if (!already) {
@@ -137,7 +146,9 @@ router.delete("/:id/members/:userId", requireRole("owner_admin", "admin"), async
   try {
     const { id, userId } = req.params;
     const team = await Team.findById(id);
-    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (!team || String(team.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "Team not found" });
+    }
 
     team.members = team.members.filter((m) => String(m.userId) !== String(userId));
     if (team.teamLeaderId && String(team.teamLeaderId) === String(userId)) {
@@ -159,7 +170,9 @@ router.patch("/:id/leader", requireRole("owner_admin", "admin"), async (req, res
   try {
     const { teamLeaderId } = req.body || {};
     const team = await Team.findById(req.params.id);
-    if (!team) return res.status(404).json({ message: "Team not found" });
+    if (!team || String(team.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "Team not found" });
+    }
 
     team.teamLeaderId = teamLeaderId || null;
     if (teamLeaderId) {

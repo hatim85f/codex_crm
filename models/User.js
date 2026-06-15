@@ -8,6 +8,7 @@ const ROLES = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const UserSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
+    organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true },
     email: {
       type: String,
       required: true,

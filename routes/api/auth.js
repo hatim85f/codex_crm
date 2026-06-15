@@ -28,9 +28,11 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    const token = jwt.sign({ id: user._id, role: user.role }, getSecret(), {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign(
+      { id: user._id, role: user.role, organization: user.organization },
+      getSecret(),
+      { expiresIn: "7d" }
+    );
 
     return res.json({ token, user: user.toJSON() });
   } catch (err) {
@@ -42,7 +44,9 @@ router.post("/login", async (req, res) => {
 // GET /api/auth/me
 router.get("/me", auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).populate("generalTeams", "name department");
+    const user = await User.findById(req.user.id)
+      .populate("generalTeams", "name department")
+      .populate("organization", "name logo slug status");
     if (!user) return res.status(404).json({ message: "User not found" });
     return res.json(user);
   } catch (err) {
