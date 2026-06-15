@@ -1,4 +1,3 @@
 {
-  "mongoURI": "mongodb+srv://hatimfayez85_db_user:baskota8411@cluster0.2ecxcyi.mongodb.net/",
-  "jwtSecret": "mysecrettoken"
+  "mongoURI": "mongodb+srv://hatimfayez85_db_user:baskota8411@cluster0.2ecxcyi.mongodb.net/"
 }
