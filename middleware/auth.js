@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const config = require("config");
+const User = require("../models/User");
 
 const getSecret = () => {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
@@ -10,7 +11,7 @@ const getSecret = () => {
   }
 };
 
-const auth = (req, res, next) => {
+const auth = async (req, res, next) => {
   const header = req.header("Authorization") || "";
   const bearer = header.startsWith("Bearer ") ? header.slice(7) : null;
   const token = bearer || req.header("x-auth-token");
@@ -21,7 +22,12 @@ const auth = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, getSecret());
-    req.user = decoded; // { id, role }
+    req.user = decoded; // { id, role, organization? }
+    // Backward-compat: older tokens have no organization claim — resolve it from the DB.
+    if (!req.user.organization && req.user.id) {
+      const u = await User.findById(req.user.id).select("organization");
+      if (u && u.organization) req.user.organization = u.organization;
+    }
     next();
   } catch (e) {
     return res.status(401).json({ message: "Token is not valid" });
