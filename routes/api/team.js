@@ -192,4 +192,42 @@ router.patch("/:id/leader", requireRole("owner_admin", "admin"), async (req, res
   }
 });
 
+// DELETE /api/teams/:id  -> hard-delete an INACTIVE team that has no work history
+router.delete("/:id", requireRole("owner_admin", "admin"), async (req, res) => {
+  try {
+    const team = await Team.findById(req.params.id);
+    if (!team || String(team.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "Team not found" });
+    }
+    if (team.status !== "inactive") {
+      return res
+        .status(400)
+        .json({ message: "Deactivate the team before deleting it." });
+    }
+
+    // Work-history guard (extensible). A team that has been used in real work must
+    // never be hard-deleted. No work modules exist yet, so this count is 0 today.
+    // When Projects / Quotations / Invoices / Tasks are added, count references to
+    // this team here and block deletion if any exist.
+    const workHistoryCount = 0;
+    if (workHistoryCount > 0) {
+      return res.status(409).json({
+        message: "This team has work history and cannot be deleted. Keep it inactive instead.",
+      });
+    }
+
+    // Detach the team from members' generalTeams, then remove it.
+    await User.updateMany(
+      { generalTeams: team._id },
+      { $pull: { generalTeams: team._id } }
+    );
+    await team.deleteOne();
+
+    return res.json({ ok: true, _id: team._id });
+  } catch (err) {
+    console.error("delete team error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;
