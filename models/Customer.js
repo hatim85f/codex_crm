@@ -9,6 +9,7 @@ const CustomerSchema = new Schema(
 
     // Basic
     displayName: { type: String, required: true, trim: true },
+    logo: { type: String, default: "" }, // Cloudinary secure_url
     companyName: { type: String, default: "" },
     firstName: { type: String, default: "" },
     lastName: { type: String, default: "" },

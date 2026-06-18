@@ -83,6 +83,7 @@ router.post("/", requireRole(...MANAGE), async (req, res) => {
       organization: req.user.organization,
       type: b.type === "individual" ? "individual" : "company",
       displayName: b.displayName,
+      logo: b.logo || "",
       companyName: b.companyName || "",
       firstName: b.firstName || "",
       lastName: b.lastName || "",
@@ -160,7 +161,7 @@ router.put("/:id", requireRole(...MANAGE), async (req, res) => {
     const customer = await loadCustomer(req, res);
     if (!customer) return;
     const b = req.body || {};
-    const fields = ["type", "displayName", "companyName", "firstName", "lastName",
+    const fields = ["type", "displayName", "logo", "companyName", "firstName", "lastName",
       "businessLine", "assignedTo", "email", "phone", "whatsapp", "tax", "online", "notes", "status"];
     fields.forEach((f) => { if (b[f] !== undefined) customer[f] = b[f]; });
     if (b.assignedTo === "") customer.assignedTo = null;
