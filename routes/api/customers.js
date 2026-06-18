@@ -191,6 +191,31 @@ router.patch("/:id/status", requireRole(...MANAGE), async (req, res) => {
   }
 });
 
+// DELETE /api/customers/:id  -> delete an INACTIVE customer (+ its contacts & portal users)
+router.delete("/:id", requireRole(...MANAGE), async (req, res) => {
+  try {
+    const customer = await loadCustomer(req, res);
+    if (!customer) return;
+    if (customer.status !== "inactive") {
+      return res.status(400).json({ message: "Deactivate the customer before deleting." });
+    }
+    // Work-history guard (extensible): block once projects/invoices reference it.
+    const workHistoryCount = 0;
+    if (workHistoryCount > 0) {
+      return res.status(409).json({ message: "This customer has history and cannot be deleted. Keep it inactive instead." });
+    }
+    const contacts = await CustomerContact.find({ customerId: customer._id });
+    const portalUserIds = contacts.filter((c) => c.userId).map((c) => c.userId);
+    if (portalUserIds.length) await User.deleteMany({ _id: { $in: portalUserIds } });
+    await CustomerContact.deleteMany({ customerId: customer._id });
+    await customer.deleteOne();
+    return res.json({ ok: true, _id: customer._id });
+  } catch (err) {
+    console.error("delete customer error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 /* ---------------- Contacts ---------------- */
 
 // POST /api/customers/:id/contacts   (body may include createPortalAccess: true)
@@ -282,6 +307,23 @@ router.patch("/:id/contacts/:contactId/status", requireRole(...MANAGE), async (r
     return res.json(contact);
   } catch (err) {
     console.error("contact status error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// DELETE /api/customers/:id/contacts/:contactId  -> delete an INACTIVE contact (+ its portal user)
+router.delete("/:id/contacts/:contactId", requireRole(...MANAGE), async (req, res) => {
+  try {
+    const { contact } = await loadContact(req, res);
+    if (!contact) return;
+    if (contact.status !== "inactive") {
+      return res.status(400).json({ message: "Deactivate the contact before deleting." });
+    }
+    if (contact.userId) await User.deleteOne({ _id: contact.userId });
+    await contact.deleteOne();
+    return res.json({ ok: true, _id: contact._id });
+  } catch (err) {
+    console.error("delete contact error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });

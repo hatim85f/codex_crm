@@ -3,6 +3,8 @@ const bcrypt = require("bcryptjs");
 
 const router = express.Router();
 const User = require("../../models/User");
+const Team = require("../../models/Team");
+const Customer = require("../../models/Customer");
 const { auth, requireRole } = require("../../middleware/auth");
 
 // All user routes require authentication
@@ -145,6 +147,38 @@ router.patch("/:id/status", requireRole("owner_admin", "admin"), async (req, res
     return res.json(target.toJSON());
   } catch (err) {
     console.error("status user error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// DELETE /api/users/:id  -> delete an INACTIVE user (with reference cleanup)
+router.delete("/:id", requireRole("owner_admin", "admin"), async (req, res) => {
+  try {
+    const target = await User.findById(req.params.id);
+    if (!target || String(target.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (String(target._id) === String(req.user.id)) {
+      return res.status(400).json({ message: "You can't delete your own account." });
+    }
+    if (req.user.role === "admin" && target.role === "owner_admin") {
+      return res.status(403).json({ message: "Admins cannot delete owner_admin users." });
+    }
+    if (target.status !== "inactive") {
+      return res.status(400).json({ message: "Deactivate the user before deleting." });
+    }
+    // Detach references so nothing is orphaned.
+    await Team.updateMany(
+      { organization: req.user.organization, "members.userId": target._id },
+      { $pull: { members: { userId: target._id } } }
+    );
+    await Team.updateMany({ teamLeaderId: target._id }, { teamLeaderId: null });
+    await Customer.updateMany({ assignedTo: target._id }, { assignedTo: null });
+
+    await target.deleteOne();
+    return res.json({ ok: true, _id: target._id });
+  } catch (err) {
+    console.error("delete user error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });
