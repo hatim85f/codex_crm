@@ -61,7 +61,7 @@ async function inviteContactUser(contact, customer, req) {
   contact.portalStatus = "invited";
   await contact.save();
 
-  const activationLink = `${webBase()}/activate-account?token=${rawToken}`;
+  const activationLink = `${webBase()}/?token=${rawToken}`;
   await sendCustomerActivation({
     email: contact.email,
     contactName: contact.name,
