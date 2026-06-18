@@ -58,12 +58,39 @@ router.get("/me", auth, async (req, res) => {
     const user = await User.findById(req.user.id)
       .populate("generalTeams", "name department")
       .populate("organization", "name logo slug status")
-      .populate("customerId", "displayName companyName type status");
+      .populate(
+        "customerId",
+        "displayName companyName type status businessLine logo email phone whatsapp online tax"
+      );
     if (!user) return res.status(404).json({ message: "User not found" });
     // userType, role, customerId, customerContactId are part of the document.
     return res.json(user);
   } catch (err) {
     console.error("me error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PUT /api/auth/me  -> any user updates THEIR OWN profile (name, phone, password)
+router.put("/me", auth, async (req, res) => {
+  try {
+    const { name, phone, password } = req.body || {};
+    const user = await User.findById(req.user.id).select("+passwordHash");
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (name !== undefined) user.name = name;
+    if (phone !== undefined) user.phone = phone;
+    if (password) {
+      if (String(password).length < 8) {
+        return res.status(400).json({ message: "Password must be at least 8 characters" });
+      }
+      user.passwordHash = await bcrypt.hash(password, 10);
+      user.mustSetPassword = false;
+    }
+    await user.save();
+    return res.json(user.toJSON());
+  } catch (err) {
+    console.error("update me error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });
