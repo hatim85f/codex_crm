@@ -74,12 +74,15 @@ router.get("/me", auth, async (req, res) => {
 // PUT /api/auth/me  -> any user updates THEIR OWN profile (name, phone, password)
 router.put("/me", auth, async (req, res) => {
   try {
-    const { name, phone, password } = req.body || {};
+    const { name, phone, password, avatar, jobTitle, department } = req.body || {};
     const user = await User.findById(req.user.id).select("+passwordHash");
     if (!user) return res.status(404).json({ message: "User not found" });
 
     if (name !== undefined) user.name = name;
     if (phone !== undefined) user.phone = phone;
+    if (avatar !== undefined) user.avatar = avatar;
+    if (jobTitle !== undefined) user.jobTitle = jobTitle;
+    if (department !== undefined) user.department = department;
     if (password) {
       if (String(password).length < 8) {
         return res.status(400).json({ message: "Password must be at least 8 characters" });

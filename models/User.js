@@ -24,7 +24,9 @@ const UserSchema = new Schema(
     role: { type: String, enum: ROLES, required: true },
     userType: { type: String, enum: USER_TYPES, default: "internal" },
     status: { type: String, enum: STATUSES, default: "active" },
-    avatar: { type: String, default: "" },
+    avatar: { type: String, default: "" }, // Cloudinary secure_url
+    jobTitle: { type: String, default: "" },
+    department: { type: String, default: "" },
     generalTeams: [{ type: Schema.Types.ObjectId, ref: "Team" }],
 
     // Customer portal linkage
