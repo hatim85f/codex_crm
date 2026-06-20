@@ -7,6 +7,7 @@ const router = express.Router();
 const User = require("../../models/User");
 const CustomerContact = require("../../models/CustomerContact");
 const { auth, getSecret } = require("../../middleware/auth");
+const { logActivity } = require("../../services/activityLog");
 
 const signToken = (user) =>
   jwt.sign(
@@ -43,6 +44,17 @@ router.post("/login", async (req, res) => {
 
     user.lastLoginAt = new Date();
     await user.save();
+
+    if (user.userType === "customer" && user.customerId) {
+      logActivity({
+        organization: user.organization,
+        customerId: user.customerId,
+        type: "customer.login",
+        message: `${user.name} signed in to the portal`,
+        actorId: user._id,
+        actorName: user.name,
+      });
+    }
 
     const token = signToken(user);
     return res.json({ token, user: user.toJSON() });
@@ -123,6 +135,16 @@ router.post("/activate-account", async (req, res) => {
 
     if (user.customerContactId) {
       await CustomerContact.findByIdAndUpdate(user.customerContactId, { portalStatus: "active" });
+    }
+    if (user.customerId) {
+      logActivity({
+        organization: user.organization,
+        customerId: user.customerId,
+        type: "portal.activated",
+        message: `${user.name} activated their portal account`,
+        actorId: user._id,
+        actorName: user.name,
+      });
     }
 
     const jwtToken = signToken(user);

@@ -5,8 +5,10 @@ const router = express.Router();
 const Customer = require("../../models/Customer");
 const CustomerContact = require("../../models/CustomerContact");
 const User = require("../../models/User");
+const Activity = require("../../models/Activity");
 const { auth, requireRole } = require("../../middleware/auth");
 const { sendCustomerActivation } = require("../../services/emailService");
+const { logActivity } = require("../../services/activityLog");
 
 const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const MANAGE = ["owner_admin", "admin"];
@@ -69,6 +71,13 @@ async function inviteContactUser(contact, customer, req) {
     activationLink,
     portalWebLink: webBase(),
   });
+  logActivity({
+    organization: req.user.organization,
+    customerId: customer._id,
+    type: "portal.invited",
+    message: `Activation email sent to ${contact.name} (${contact.email})`,
+    actorId: req.user.id,
+  });
   return user;
 }
 
@@ -96,6 +105,13 @@ router.post("/", requireRole(...MANAGE), async (req, res) => {
       online: b.online || {},
       notes: b.notes || "",
       status: b.status === "inactive" ? "inactive" : "active",
+    });
+    logActivity({
+      organization: req.user.organization,
+      customerId: customer._id,
+      type: "customer.created",
+      message: `Customer "${customer.displayName}" created`,
+      actorId: req.user.id,
     });
     return res.status(201).json(customer);
   } catch (err) {
@@ -145,6 +161,24 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// GET /api/customers/:id/activities -> timeline for a customer
+router.get("/:id/activities", async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.id);
+    if (!customer || String(customer.organization) !== String(req.user.organization)) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+    const activities = await Activity.find({ customerId: customer._id, organization: req.user.organization })
+      .populate("actorId", "name avatar")
+      .sort({ createdAt: -1 })
+      .limit(100);
+    return res.json(activities);
+  } catch (err) {
+    console.error("list activities error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 // helper to load a tenant-scoped customer
 async function loadCustomer(req, res) {
   const customer = await Customer.findById(req.params.id);
@@ -166,6 +200,13 @@ router.put("/:id", requireRole(...MANAGE), async (req, res) => {
     fields.forEach((f) => { if (b[f] !== undefined) customer[f] = b[f]; });
     if (b.assignedTo === "") customer.assignedTo = null;
     await customer.save();
+    logActivity({
+      organization: req.user.organization,
+      customerId: customer._id,
+      type: "customer.updated",
+      message: "Customer details updated",
+      actorId: req.user.id,
+    });
     const out = await Customer.findById(customer._id).populate("assignedTo", "name email");
     return res.json(out);
   } catch (err) {
@@ -185,6 +226,13 @@ router.patch("/:id/status", requireRole(...MANAGE), async (req, res) => {
     if (!customer) return;
     customer.status = status;
     await customer.save();
+    logActivity({
+      organization: req.user.organization,
+      customerId: customer._id,
+      type: "customer.status",
+      message: `Customer marked ${status}`,
+      actorId: req.user.id,
+    });
     return res.json(customer);
   } catch (err) {
     console.error("status customer error:", err.message);
@@ -239,6 +287,13 @@ router.post("/:id/contacts", requireRole(...MANAGE), async (req, res) => {
       phone: b.phone || "",
       whatsapp: b.whatsapp || "",
       isPrimary: !!b.isPrimary,
+    });
+    logActivity({
+      organization: req.user.organization,
+      customerId: customer._id,
+      type: "contact.added",
+      message: `Contact "${contact.name}" added`,
+      actorId: req.user.id,
     });
 
     if (b.createPortalAccess) {
