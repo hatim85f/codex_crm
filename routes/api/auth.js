@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const router = express.Router();
 const User = require("../../models/User");
 const CustomerContact = require("../../models/CustomerContact");
+const Customer = require("../../models/Customer");
 const { auth, getSecret } = require("../../middleware/auth");
 const { logActivity } = require("../../services/activityLog");
 
@@ -106,6 +107,44 @@ router.put("/me", auth, async (req, res) => {
     return res.json(user.toJSON());
   } catch (err) {
     console.error("update me error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PUT /api/auth/my-customer -> a customer edits SOME of their own company fields.
+// TRN, billing address, status, type and assignment are NOT editable here.
+router.put("/my-customer", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || user.userType !== "customer" || !user.customerId) {
+      return res.status(403).json({ message: "Not a customer account" });
+    }
+    const customer = await Customer.findById(user.customerId);
+    if (!customer || String(customer.organization) !== String(user.organization)) {
+      return res.status(404).json({ message: "Company not found" });
+    }
+    const b = req.body || {};
+    ["displayName", "companyName", "businessLine", "phone", "whatsapp", "email", "logo"].forEach((f) => {
+      if (b[f] !== undefined) customer[f] = b[f];
+    });
+    if (b.online && typeof b.online === "object") {
+      customer.online = customer.online || {};
+      ["website", "instagram", "linkedin", "facebook", "x"].forEach((k) => {
+        if (b.online[k] !== undefined) customer.online[k] = b.online[k];
+      });
+    }
+    await customer.save();
+    logActivity({
+      organization: user.organization,
+      customerId: customer._id,
+      type: "customer.updated",
+      message: `${user.name} updated company details`,
+      actorId: user._id,
+      actorName: user.name,
+    });
+    return res.json(customer);
+  } catch (err) {
+    console.error("update my-customer error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });
