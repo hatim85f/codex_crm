@@ -14,7 +14,9 @@ const CustomerSchema = new Schema(
     firstName: { type: String, default: "" },
     lastName: { type: String, default: "" },
     businessLine: { type: String, default: "" },
-    assignedTo: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    assignedTo: { type: Schema.Types.ObjectId, ref: "User", default: null }, // primary owner
+    assignees: [{ type: Schema.Types.ObjectId, ref: "User" }], // additional assigned team members
+    teams: [{ type: Schema.Types.ObjectId, ref: "Team" }], // connected teams
 
     // Contact
     email: { type: String, default: "", lowercase: true, trim: true },

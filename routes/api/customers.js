@@ -13,10 +13,24 @@ const { logActivity } = require("../../services/activityLog");
 const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const MANAGE = ["owner_admin", "admin"];
 
-// owner_admin/admin see every client; everyone else only the clients assigned to them.
+// owner_admin/admin see every client; everyone else only clients they're assigned to
+// (primary owner, in the assignees array, or via a connected team they belong to).
 const canSeeAll = (req) => ["owner_admin", "admin"].includes(req.user.role);
-const ownsCustomer = (req, customer) =>
-  canSeeAll(req) || String(customer.assignedTo?._id || customer.assignedTo) === String(req.user.id);
+
+async function myTeamIds(req) {
+  const me = await User.findById(req.user.id).select("generalTeams");
+  return (me?.generalTeams || []).map((t) => String(t));
+}
+
+async function canAccess(req, customer) {
+  if (canSeeAll(req)) return true;
+  const meId = String(req.user.id);
+  if (String(customer.assignedTo?._id || customer.assignedTo) === meId) return true;
+  if ((customer.assignees || []).some((a) => String(a?._id || a) === meId)) return true;
+  const teamIds = new Set(await myTeamIds(req));
+  if ((customer.teams || []).some((t) => teamIds.has(String(t?._id || t)))) return true;
+  return false;
+}
 
 const webBase = () =>
   process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
@@ -103,6 +117,8 @@ router.post("/", requireRole(...MANAGE), async (req, res) => {
       lastName: b.lastName || "",
       businessLine: b.businessLine || "",
       assignedTo: b.assignedTo || null,
+      assignees: Array.isArray(b.assignees) ? b.assignees : [],
+      teams: Array.isArray(b.teams) ? b.teams : [],
       email: b.email || "",
       phone: b.phone || "",
       whatsapp: b.whatsapp || "",
@@ -130,21 +146,33 @@ router.get("/", async (req, res) => {
   try {
     const { search, status, type, businessLine, assignedTo } = req.query;
     const query = { organization: req.user.organization };
-    // Non-admins only see clients assigned to them.
-    if (!canSeeAll(req)) query.assignedTo = req.user.id;
     if (status) query.status = status;
     if (type) query.type = type;
     if (businessLine) query.businessLine = businessLine;
     if (assignedTo) query.assignedTo = assignedTo;
+
+    const and = [];
+    // Non-admins only see clients assigned to them (owner / assignee / connected team).
+    if (!canSeeAll(req)) {
+      const teamIds = await myTeamIds(req);
+      and.push({ $or: [
+        { assignedTo: req.user.id },
+        { assignees: req.user.id },
+        { teams: { $in: teamIds } },
+      ] });
+    }
     if (search) {
       const rx = new RegExp(String(search).trim(), "i");
-      query.$or = [
-        { displayName: rx }, { companyName: rx }, { email: rx },
-        { phone: rx }, { whatsapp: rx },
-      ];
+      and.push({ $or: [
+        { displayName: rx }, { companyName: rx }, { email: rx }, { phone: rx }, { whatsapp: rx },
+      ] });
     }
+    if (and.length) query.$and = and;
+
     const customers = await Customer.find(query)
-      .populate("assignedTo", "name email")
+      .populate("assignedTo", "name email avatar")
+      .populate("assignees", "name email avatar")
+      .populate("teams", "name department")
       .sort({ createdAt: -1 });
     return res.json(customers);
   } catch (err) {
@@ -156,8 +184,11 @@ router.get("/", async (req, res) => {
 // GET /api/customers/:id  (with contacts)
 router.get("/:id", async (req, res) => {
   try {
-    const customer = await Customer.findById(req.params.id).populate("assignedTo", "name email");
-    if (!customer || String(customer.organization) !== String(req.user.organization) || !ownsCustomer(req, customer)) {
+    const customer = await Customer.findById(req.params.id)
+      .populate("assignedTo", "name email avatar")
+      .populate("assignees", "name email avatar")
+      .populate("teams", "name department");
+    if (!customer || String(customer.organization) !== String(req.user.organization) || !(await canAccess(req, customer))) {
       return res.status(404).json({ message: "Customer not found" });
     }
     const contacts = await CustomerContact.find({ customerId: customer._id }).sort({ isPrimary: -1, createdAt: 1 });
@@ -172,7 +203,7 @@ router.get("/:id", async (req, res) => {
 router.get("/:id/activities", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer || String(customer.organization) !== String(req.user.organization) || !ownsCustomer(req, customer)) {
+    if (!customer || String(customer.organization) !== String(req.user.organization) || !(await canAccess(req, customer))) {
       return res.status(404).json({ message: "Customer not found" });
     }
     const activities = await Activity.find({ customerId: customer._id, organization: req.user.organization })
@@ -203,7 +234,7 @@ router.put("/:id", requireRole(...MANAGE), async (req, res) => {
     if (!customer) return;
     const b = req.body || {};
     const fields = ["type", "displayName", "logo", "companyName", "firstName", "lastName",
-      "businessLine", "assignedTo", "email", "phone", "whatsapp", "tax", "online", "notes", "status"];
+      "businessLine", "assignedTo", "assignees", "teams", "email", "phone", "whatsapp", "tax", "online", "notes", "status"];
     fields.forEach((f) => { if (b[f] !== undefined) customer[f] = b[f]; });
     if (b.assignedTo === "") customer.assignedTo = null;
     await customer.save();
@@ -214,7 +245,10 @@ router.put("/:id", requireRole(...MANAGE), async (req, res) => {
       message: "Customer details updated",
       actorId: req.user.id,
     });
-    const out = await Customer.findById(customer._id).populate("assignedTo", "name email");
+    const out = await Customer.findById(customer._id)
+      .populate("assignedTo", "name email avatar")
+      .populate("assignees", "name email avatar")
+      .populate("teams", "name department");
     return res.json(out);
   } catch (err) {
     console.error("update customer error:", err.message);
