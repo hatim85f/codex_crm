@@ -9,7 +9,6 @@ const Organization = require("../models/Organization");
 
 const ORG = {
   name: "Codex FZE Technology",
-  slug: "codex-fze",
   logo: "", // set via the app (Cloudinary) or here as a secure_url
   status: "active",
 };
@@ -38,8 +37,8 @@ const run = async () => {
   }
   await connectDB();
 
-  // 1) Organization (tenant)
-  let org = await Organization.findOne({ slug: ORG.slug });
+  // 1) The single Codex company record
+  let org = await Organization.findOne({ name: ORG.name });
   if (!org) {
     org = await Organization.create(ORG);
     console.log(`Created organization: ${org.name} (${org._id})`);

@@ -34,7 +34,7 @@ router.post("/", requireRole("owner_admin", "admin"), async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({
       name,
-      organization: req.user.organization, // tenant scope
+      organization: req.user.organization, // company scope
       email,
       phone: phone || "",
       role,

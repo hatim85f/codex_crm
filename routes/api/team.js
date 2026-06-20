@@ -20,7 +20,7 @@ router.post("/", requireRole("owner_admin", "admin"), async (req, res) => {
 
     const team = await Team.create({
       name,
-      organization: req.user.organization, // tenant scope
+      organization: req.user.organization, // company scope
       type: type || "general",
       department: department || "",
       description: description || "",

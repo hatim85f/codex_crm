@@ -6,7 +6,7 @@ const { auth, requireRole } = require("../../middleware/auth");
 
 router.use(auth);
 
-// GET /api/organizations/me -> the caller's organization (tenant)
+// GET /api/organizations/me -> the Codex company record (single-company CRM)
 router.get("/me", async (req, res) => {
   try {
     if (!req.user.organization) {

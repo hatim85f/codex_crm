@@ -5,7 +5,6 @@ const { Schema } = mongoose;
 const OrganizationSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
-    slug: { type: String, trim: true, lowercase: true },
     logo: { type: String, default: "" }, // Cloudinary secure_url
     status: { type: String, enum: ["active", "inactive"], default: "active" },
     contactEmail: { type: String, default: "" },
