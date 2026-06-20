@@ -13,6 +13,11 @@ const { logActivity } = require("../../services/activityLog");
 const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const MANAGE = ["owner_admin", "admin"];
 
+// owner_admin/admin see every client; everyone else only the clients assigned to them.
+const canSeeAll = (req) => ["owner_admin", "admin"].includes(req.user.role);
+const ownsCustomer = (req, customer) =>
+  canSeeAll(req) || String(customer.assignedTo?._id || customer.assignedTo) === String(req.user.id);
+
 const webBase = () =>
   process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
 
@@ -125,6 +130,8 @@ router.get("/", async (req, res) => {
   try {
     const { search, status, type, businessLine, assignedTo } = req.query;
     const query = { organization: req.user.organization };
+    // Non-admins only see clients assigned to them.
+    if (!canSeeAll(req)) query.assignedTo = req.user.id;
     if (status) query.status = status;
     if (type) query.type = type;
     if (businessLine) query.businessLine = businessLine;
@@ -150,7 +157,7 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id).populate("assignedTo", "name email");
-    if (!customer || String(customer.organization) !== String(req.user.organization)) {
+    if (!customer || String(customer.organization) !== String(req.user.organization) || !ownsCustomer(req, customer)) {
       return res.status(404).json({ message: "Customer not found" });
     }
     const contacts = await CustomerContact.find({ customerId: customer._id }).sort({ isPrimary: -1, createdAt: 1 });
@@ -165,7 +172,7 @@ router.get("/:id", async (req, res) => {
 router.get("/:id/activities", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer || String(customer.organization) !== String(req.user.organization)) {
+    if (!customer || String(customer.organization) !== String(req.user.organization) || !ownsCustomer(req, customer)) {
       return res.status(404).json({ message: "Customer not found" });
     }
     const activities = await Activity.find({ customerId: customer._id, organization: req.user.organization })

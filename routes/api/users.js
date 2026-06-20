@@ -55,7 +55,8 @@ router.post("/", requireRole("owner_admin", "admin"), async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { role, status, search } = req.query;
-    const query = { organization: req.user.organization }; // tenant scope
+    // Team members only — customers live in the Customers module, not here.
+    const query = { organization: req.user.organization, userType: "internal" };
     if (role) query.role = role;
     if (status) query.status = status;
     if (search) {
