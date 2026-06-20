@@ -8,6 +8,7 @@ const BankAccountSchema = new Schema(
   {
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
     bankName: { type: String, required: true, trim: true },
+    logo: { type: String, default: "" }, // bank logo (preset Clearbit URL or uploaded Cloudinary URL)
     accountHolderName: { type: String, default: "" },
     accountNumber: { type: String, default: "" },
     iban: { type: String, default: "" },

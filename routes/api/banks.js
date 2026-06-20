@@ -10,7 +10,7 @@ const MANAGE = ["owner_admin", "admin"]; // manager/accountant level
 router.use(auth);
 router.use(requireRole(...INTERNAL));
 
-const FIELDS = ["bankName", "accountHolderName", "accountNumber", "iban", "swift",
+const FIELDS = ["bankName", "logo", "accountHolderName", "accountNumber", "iban", "swift",
   "currency", "branch", "address", "notes", "isPrimary", "status"];
 
 // GET /api/banks -> org bank accounts
@@ -29,6 +29,7 @@ router.post("/", requireRole(...MANAGE), async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.bankName) return res.status(400).json({ message: "Bank name is required" });
+    if (!b.logo) return res.status(400).json({ message: "Bank logo is required" });
     if (b.isPrimary) {
       await BankAccount.updateMany({ organization: req.user.organization }, { isPrimary: false });
     }
