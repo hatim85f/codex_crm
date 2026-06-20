@@ -2,12 +2,11 @@ const mongoose = require("mongoose");
 
 const { Schema } = mongoose;
 
-const ServiceCategorySchema = new Schema(
+const BusinessLineSchema = new Schema(
   {
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
     name: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
-    businessLine: { type: String, default: "", trim: true },
     status: { type: String, enum: ["active", "inactive"], default: "active", index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
@@ -15,6 +14,6 @@ const ServiceCategorySchema = new Schema(
   { timestamps: true }
 );
 
-ServiceCategorySchema.index({ organization: 1, name: 1 }, { unique: true });
+BusinessLineSchema.index({ organization: 1, name: 1 }, { unique: true });
 
-module.exports = mongoose.model("ServiceCategory", ServiceCategorySchema);
+module.exports = mongoose.model("BusinessLine", BusinessLineSchema);

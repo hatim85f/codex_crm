@@ -4,8 +4,19 @@ const mongoose = require("mongoose");
 const connectDB = require("../config/db");
 const Organization = require("../models/Organization");
 const User = require("../models/User");
+const BusinessLine = require("../models/BusinessLine");
 const ServiceCategory = require("../models/ServiceCategory");
 const Service = require("../models/Service");
+
+const businessLines = [
+  "Software Development",
+  "Marketing Services",
+  "Media Production",
+  "eCommerce",
+  "Dropshipping",
+  "Hosting / Maintenance",
+  "Other",
+];
 
 const categories = [
   "Software Development",
@@ -41,6 +52,17 @@ async function main() {
   if (!org) throw new Error("No organization found. Seed an owner/organization first.");
   const owner = await User.findOne({ organization: org._id, role: { $in: ["owner_admin", "admin"] } }).sort({ createdAt: 1 });
   const byName = new Map();
+
+  for (const name of businessLines) {
+    await BusinessLine.findOneAndUpdate(
+      { organization: org._id, name },
+      {
+        $setOnInsert: { organization: org._id, name, description: `${name} business line`, createdBy: owner?._id || null },
+        $set: { updatedBy: owner?._id || null },
+      },
+      { upsert: true, new: true }
+    );
+  }
 
   for (const name of categories) {
     const category = await ServiceCategory.findOneAndUpdate(
@@ -82,7 +104,7 @@ async function main() {
     );
   }
 
-  console.log(`Seeded ${categories.length} categories and ${services.length} services for ${org.name}`);
+  console.log(`Seeded ${businessLines.length} business lines, ${categories.length} categories and ${services.length} services`);
 }
 
 main()

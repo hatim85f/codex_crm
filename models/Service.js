@@ -1,5 +1,4 @@
 const mongoose = require("mongoose");
-const { BUSINESS_LINES } = require("./ServiceCategory");
 
 const { Schema } = mongoose;
 
@@ -11,7 +10,7 @@ const ServiceSchema = new Schema(
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
     serviceName: { type: String, required: true, trim: true },
     categoryId: { type: Schema.Types.ObjectId, ref: "ServiceCategory", required: true, index: true },
-    businessLine: { type: String, enum: BUSINESS_LINES, default: "Other" },
+    businessLine: { type: String, default: "", trim: true },
     description: { type: String, default: "" },
     defaultPrice: { type: Number, default: 0, min: 0 },
     currency: { type: String, enum: CURRENCIES, default: "AED" },
