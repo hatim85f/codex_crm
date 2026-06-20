@@ -23,6 +23,8 @@ app.use("/api/banks", require("./routes/api/banks"));
 app.use("/api/business-lines", require("./routes/api/businessLines"));
 app.use("/api/service-categories", require("./routes/api/serviceCategories"));
 app.use("/api/services", require("./routes/api/services"));
+app.use("/api/quotations", require("./routes/api/quotations"));
+app.use("/api/invoices", require("./routes/api/invoices"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
@@ -33,5 +35,7 @@ process.on("SIGINT", async () => {
   await mongoose.connection.close();
   process.exit(0);
 });
+
+
 
 
