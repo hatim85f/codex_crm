@@ -35,6 +35,19 @@ const HistorySchema = new Schema(
   { _id: false }
 );
 
+// Terms are COPIED into the quotation (not just referenced) so historical quotations
+// keep the exact terms approved/sent, even if the source template is edited later.
+const TermLineSchema = new Schema(
+  {
+    termId: { type: Schema.Types.ObjectId, ref: "QuotationTerm", default: null },
+    title: { type: String, required: true, trim: true },
+    body: { type: String, default: "" },
+    category: { type: String, default: "general" },
+    sortOrder: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const QuotationSchema = new Schema(
   {
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
@@ -55,6 +68,7 @@ const QuotationSchema = new Schema(
     grandTotal: { type: Number, default: 0, min: 0 },
     notes: { type: String, default: "" },
     terms: { type: String, default: "" },
+    termsAndConditions: { type: [TermLineSchema], default: [] },
     internalNotes: { type: String, default: "" },
     pdfUrl: { type: String, default: "" },
     emailSentAt: { type: Date, default: null },

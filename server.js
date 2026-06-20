@@ -23,6 +23,7 @@ app.use("/api/banks", require("./routes/api/banks"));
 app.use("/api/business-lines", require("./routes/api/businessLines"));
 app.use("/api/service-categories", require("./routes/api/serviceCategories"));
 app.use("/api/services", require("./routes/api/services"));
+app.use("/api/quotation-terms", require("./routes/api/quotationTerms"));
 app.use("/api/quotations", require("./routes/api/quotations"));
 app.use("/api/invoices", require("./routes/api/invoices"));
 

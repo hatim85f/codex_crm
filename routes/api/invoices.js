@@ -10,7 +10,7 @@ const Service = require("../../models/Service");
 const BankAccount = require("../../models/BankAccount");
 const { auth, requireRole } = require("../../middleware/auth");
 const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
-const { nextDocumentNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
+const { nextDocumentNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
 const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const MANAGE = ["owner_admin", "admin"];
@@ -180,7 +180,7 @@ router.get("/", async (req, res) => {
 router.post("/", requireRole(...MANAGE), async (req, res) => {
   try {
     const payload = await preparePayload(req, req.body || {});
-    payload.invoiceNumber = payload.invoiceNumber || await nextDocumentNumber(Invoice, req.user.organization, "INV", "invoiceNumber", payload.issueDate);
+    payload.invoiceNumber = payload.invoiceNumber || await nextInvoiceNumber(Invoice, req.user.organization, payload.customerId, payload.issueDate);
     const invoice = new Invoice({ ...payload, organization: req.user.organization, createdBy: req.user.id, updatedBy: req.user.id });
     applyStatusTimestamps(invoice, invoice.status);
     addHistory(invoice, "invoice.created", `Invoice ${invoice.invoiceNumber} created`, req);
@@ -191,6 +191,19 @@ router.post("/", requireRole(...MANAGE), async (req, res) => {
     const code = err.status || (err.code === 11000 ? 409 : 400);
     if (code < 500) return res.status(code).json({ message: err.message || "Could not create invoice" });
     console.error("create invoice error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Preview the next auto-generated invoice number for a customer (read-only, shown in the form).
+router.get("/next-number", async (req, res) => {
+  try {
+    const { customerId, issueDate } = req.query;
+    if (!customerId) return res.status(400).json({ message: "customerId is required" });
+    const invoiceNumber = await nextInvoiceNumber(Invoice, req.user.organization, customerId, issueDate || new Date());
+    return res.json({ invoiceNumber });
+  } catch (err) {
+    console.error("next invoice number error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });

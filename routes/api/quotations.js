@@ -9,12 +9,33 @@ const CustomerContact = require("../../models/CustomerContact");
 const Service = require("../../models/Service");
 const { auth, requireRole } = require("../../middleware/auth");
 const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
-const { nextDocumentNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
+const { nextDocumentNumber, nextQuotationNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
 const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const MANAGE = ["owner_admin", "admin", "sales"];
 const STATUSES = ["draft", "sent", "accepted", "rejected", "expired", "cancelled", "converted_to_invoice"];
-const BODY_FIELDS = ["quotationNumber", "customerId", "contactId", "status", "issueDate", "validUntil", "currency", "businessLine", "discountType", "discountValue", "notes", "terms", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
+const BODY_FIELDS = ["quotationNumber", "customerId", "contactId", "status", "issueDate", "validUntil", "currency", "businessLine", "discountType", "discountValue", "notes", "terms", "termsAndConditions", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
+
+// Terms are copied (not referenced) into the quotation so they are frozen at save time.
+function sanitizeTerms(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((t, i) => ({
+      termId: t && t.termId && mongoose.Types.ObjectId.isValid(t.termId) ? t.termId : null,
+      title: String((t && t.title) || "").trim(),
+      body: String((t && t.body) || ""),
+      category: (t && t.category) || "general",
+      sortOrder: t && t.sortOrder !== undefined ? Number(t.sortOrder) : i,
+    }))
+    .filter((t) => t.title);
+}
+
+function defaultValidUntil(issueDate) {
+  const d = new Date(issueDate);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + 7);
+  return d;
+}
 
 router.use(auth);
 router.use(requireRole(...VIEW));
@@ -101,12 +122,13 @@ async function preparePayload(req, body = {}, existingId = null) {
     contactId: body.contactId || null,
     status: STATUSES.includes(body.status) ? body.status : "draft",
     issueDate: body.issueDate,
-    validUntil: body.validUntil || null,
+    validUntil: body.validUntil || defaultValidUntil(body.issueDate),
     currency: body.currency,
     businessLine: String(body.businessLine).trim(),
     ...totals,
     notes: body.notes || "",
     terms: body.terms || "",
+    termsAndConditions: sanitizeTerms(body.termsAndConditions),
     internalNotes: body.internalNotes || "",
     pdfUrl: body.pdfUrl || "",
     emailSentAt: body.emailSentAt || null,
@@ -144,7 +166,7 @@ router.get("/", async (req, res) => {
 router.post("/", requireRole(...MANAGE), async (req, res) => {
   try {
     const payload = await preparePayload(req, req.body || {});
-    payload.quotationNumber = payload.quotationNumber || await nextDocumentNumber(Quotation, req.user.organization, "QUO", "quotationNumber", payload.issueDate);
+    payload.quotationNumber = payload.quotationNumber || await nextQuotationNumber(Quotation, req.user.organization);
     const quotation = new Quotation({ ...payload, organization: req.user.organization, createdBy: req.user.id, updatedBy: req.user.id });
     applyStatusTimestamps(quotation, quotation.status);
     addHistory(quotation, "quotation.created", `Quotation ${quotation.quotationNumber} created`, req);
@@ -155,6 +177,17 @@ router.post("/", requireRole(...MANAGE), async (req, res) => {
     const code = err.status || (err.code === 11000 ? 409 : 400);
     if (code < 500) return res.status(code).json({ message: err.message || "Could not create quotation" });
     console.error("create quotation error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Preview the next auto-generated quotation number (read-only, shown in the form).
+router.get("/next-number", async (req, res) => {
+  try {
+    const quotationNumber = await nextQuotationNumber(Quotation, req.user.organization);
+    return res.json({ quotationNumber });
+  } catch (err) {
+    console.error("next quotation number error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });
@@ -217,7 +250,7 @@ router.post("/:id/duplicate", requireRole(...MANAGE), async (req, res) => {
   try {
     const source = await loadQuotation(req, res);
     if (!source) return;
-    const quotationNumber = await nextDocumentNumber(Quotation, req.user.organization, "QUO", "quotationNumber", new Date());
+    const quotationNumber = await nextQuotationNumber(Quotation, req.user.organization);
     const duplicate = new Quotation({
       organization: req.user.organization,
       quotationNumber,
@@ -237,6 +270,7 @@ router.post("/:id/duplicate", requireRole(...MANAGE), async (req, res) => {
       grandTotal: source.grandTotal,
       notes: source.notes,
       terms: source.terms,
+      termsAndConditions: source.termsAndConditions.map((t) => (t.toObject ? t.toObject() : t)),
       internalNotes: source.internalNotes,
       createdBy: req.user.id,
       updatedBy: req.user.id,
@@ -262,7 +296,7 @@ router.post("/:id/create-invoice", requireRole("owner_admin", "admin"), async (r
     if (quotation.convertedToInvoiceId) return res.status(409).json({ message: "Quotation already has an invoice" });
     const invoiceNumber = req.body?.invoiceNumber
       ? String(req.body.invoiceNumber).trim()
-      : await nextDocumentNumber(Invoice, req.user.organization, "INV", "invoiceNumber", req.body?.issueDate || new Date());
+      : await nextInvoiceNumber(Invoice, req.user.organization, quotation.customerId, req.body?.issueDate || new Date());
     await ensureManualNumberAvailable(Invoice, req.user.organization, "invoiceNumber", invoiceNumber);
     if (req.body?.status && !["draft", "sent", "partially_paid", "paid", "overdue", "cancelled", "pending_bank_verification"].includes(req.body.status)) {
       return res.status(400).json({ message: "Invalid invoice status" });
