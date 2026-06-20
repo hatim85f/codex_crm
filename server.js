@@ -20,6 +20,8 @@ app.use("/api/teams", require("./routes/api/team"));
 app.use("/api/organizations", require("./routes/api/organization"));
 app.use("/api/customers", require("./routes/api/customers"));
 app.use("/api/banks", require("./routes/api/banks"));
+app.use("/api/service-categories", require("./routes/api/serviceCategories"));
+app.use("/api/services", require("./routes/api/services"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
@@ -30,3 +32,4 @@ process.on("SIGINT", async () => {
   await mongoose.connection.close();
   process.exit(0);
 });
+

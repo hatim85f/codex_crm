@@ -8,7 +8,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "seed:owner": "node scripts/seed-owner.js",
-    "test:db": "node scripts/test-db-connection.js"
+    "test:db": "node scripts/test-db-connection.js",
+    "seed:services": "node scripts/seed-services.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
