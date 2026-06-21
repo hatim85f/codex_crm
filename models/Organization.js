@@ -10,6 +10,7 @@ const OrganizationSchema = new Schema(
     contactEmail: { type: String, default: "" },
     contactPhone: { type: String, default: "" },
     address: { type: String, default: "" },
+    taxNumber: { type: String, default: "" }, // Codex TRN, shown on quotations/invoices
   },
   { timestamps: true }
 );

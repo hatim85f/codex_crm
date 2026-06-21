@@ -7,6 +7,7 @@ const router = express.Router();
 const User = require("../../models/User");
 const CustomerContact = require("../../models/CustomerContact");
 const Customer = require("../../models/Customer");
+const Quotation = require("../../models/Quotation");
 const { auth, getSecret } = require("../../middleware/auth");
 const { logActivity } = require("../../services/activityLog");
 
@@ -70,7 +71,7 @@ router.get("/me", auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id)
       .populate("generalTeams", "name department")
-      .populate("organization", "name logo slug status")
+      .populate("organization", "name logo status taxNumber contactEmail contactPhone address")
       .populate(
         "customerId",
         "displayName companyName type status businessLine logo email phone whatsapp online tax"
@@ -145,6 +146,28 @@ router.put("/my-customer", auth, async (req, res) => {
     return res.json(customer);
   } catch (err) {
     console.error("update my-customer error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET /api/auth/my-quotations -> quotations shared to this customer's portal
+router.get("/my-quotations", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || user.userType !== "customer" || !user.customerId) {
+      return res.status(403).json({ message: "Not a customer account" });
+    }
+    const quotations = await Quotation.find({
+      organization: user.organization,
+      customerId: user.customerId,
+      sharedToPortal: true,
+    })
+      .populate("customerId", "displayName companyName email phone tax")
+      .populate("contactId", "name email phone")
+      .sort({ createdAt: -1 });
+    return res.json(quotations);
+  } catch (err) {
+    console.error("my-quotations error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });

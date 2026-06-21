@@ -7,6 +7,7 @@ const TEMPLATES = {
   FORGOT_PASSWORD: 3, // params: userName, otp
   TEAM_INVITATION: 4, // params: userName, manager, userEmail, password
   CUSTOMER_ACTIVATION: 7, // params: contactName, customerName, activationLink, portalWebLink, iosAppLink, androidAppLink
+  QUOTATION_PORTAL: 9, // params: firstName, lastName, assignedPerso, assigneePhone, fileLink
 };
 
 async function sendBrevoEmail({ templateId, to, params }) {
@@ -61,6 +62,21 @@ function sendTeamInvitation({ email, userName, manager, userEmail, password }) {
   });
 }
 
+// Quotation available on portal — Brevo template #9
+function sendQuotationPortal({ email, firstName, lastName, assignedPerso, assigneePhone, fileLink }) {
+  return sendBrevoEmail({
+    templateId: TEMPLATES.QUOTATION_PORTAL,
+    to: { email, name: `${firstName || ""} ${lastName || ""}`.trim() || email },
+    params: {
+      firstName: firstName || "",
+      lastName: lastName || "",
+      assignedPerso: assignedPerso || "our team",
+      assigneePhone: assigneePhone || "",
+      fileLink: fileLink || "",
+    },
+  });
+}
+
 // Forgot password (OTP) — Brevo template #3
 function sendForgotPassword({ email, userName, otp }) {
   return sendBrevoEmail({
@@ -76,4 +92,5 @@ module.exports = {
   sendCustomerActivation,
   sendTeamInvitation,
   sendForgotPassword,
+  sendQuotationPortal,
 };

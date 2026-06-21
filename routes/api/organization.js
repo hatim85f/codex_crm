@@ -24,7 +24,7 @@ router.get("/me", async (req, res) => {
 // PUT /api/organizations/me -> update own org (name, logo, contact)
 router.put("/me", requireRole("owner_admin", "admin"), async (req, res) => {
   try {
-    const { name, logo, contactEmail, contactPhone, address, status } = req.body || {};
+    const { name, logo, contactEmail, contactPhone, address, status, taxNumber } = req.body || {};
     const org = await Organization.findById(req.user.organization);
     if (!org) return res.status(404).json({ message: "Organization not found" });
 
@@ -34,6 +34,7 @@ router.put("/me", requireRole("owner_admin", "admin"), async (req, res) => {
     if (contactPhone !== undefined) org.contactPhone = contactPhone;
     if (address !== undefined) org.address = address;
     if (status !== undefined) org.status = status;
+    if (taxNumber !== undefined) org.taxNumber = taxNumber;
 
     await org.save();
     return res.json(org);

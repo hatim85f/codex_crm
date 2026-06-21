@@ -8,6 +8,7 @@ const Customer = require("../../models/Customer");
 const CustomerContact = require("../../models/CustomerContact");
 const Service = require("../../models/Service");
 const { auth, requireRole } = require("../../middleware/auth");
+const { sendQuotationPortal } = require("../../services/emailService");
 const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
 const { nextDocumentNumber, nextQuotationNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
@@ -135,9 +136,11 @@ async function preparePayload(req, body = {}, existingId = null) {
   };
 }
 
+const webBase = () => process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
+
 function populateQuotation(query) {
   return query
-    .populate("customerId", "displayName companyName email")
+    .populate({ path: "customerId", select: "displayName companyName email phone tax assignedTo", populate: { path: "assignedTo", select: "name phone email" } })
     .populate("contactId", "name email phone")
     .populate("createdBy", "name email")
     .populate("updatedBy", "name email")
@@ -242,6 +245,60 @@ router.patch("/:id/status", requireRole(...MANAGE), async (req, res) => {
     return res.json(out);
   } catch (err) {
     console.error("quotation status error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/quotations/:id/send  { portal, email }
+// portal -> make it visible in the customer portal; email -> send Brevo template #9.
+// Omit both -> sends to both. Returns the quotation plus any email error (non-fatal).
+router.post("/:id/send", requireRole(...MANAGE), async (req, res) => {
+  try {
+    let { portal, email } = req.body || {};
+    if (portal === undefined && email === undefined) { portal = true; email = true; }
+    portal = !!portal; email = !!email;
+    if (!portal && !email) return res.status(400).json({ message: "Choose portal, email, or both" });
+
+    const quotation = await loadQuotation(req, res);
+    if (!quotation) return;
+    if (portal) { quotation.sharedToPortal = true; quotation.sharedToPortalAt = new Date(); }
+    if (email) { quotation.emailSentAt = new Date(); }
+    if (quotation.status === "draft") { quotation.status = "sent"; if (!quotation.sentAt) quotation.sentAt = new Date(); }
+    quotation.updatedBy = req.user.id;
+    const channels = [portal && "portal", email && "email"].filter(Boolean).join(" + ");
+    addHistory(quotation, "quotation.sent", `Quotation sent (${channels})`, req);
+    await quotation.save();
+
+    let emailError = null;
+    if (email) {
+      const populated = await populateQuotation(Quotation.findById(quotation._id));
+      const contact = populated.contactId;
+      const customer = populated.customerId;
+      const recipient = contact?.email || customer?.email;
+      if (!recipient) {
+        emailError = "No email address found for this customer or contact.";
+      } else {
+        const parts = String(contact?.name || customer?.displayName || "").trim().split(/\s+/);
+        const assignee = customer?.assignedTo;
+        try {
+          await sendQuotationPortal({
+            email: recipient,
+            firstName: parts[0] || "",
+            lastName: parts.slice(1).join(" "),
+            assignedPerso: assignee?.name,
+            assigneePhone: assignee?.phone,
+            fileLink: quotation.pdfUrl || `${webBase()}/portal`,
+          });
+        } catch (e) {
+          emailError = e.message || "Failed to send email";
+        }
+      }
+    }
+
+    const out = await populateQuotation(Quotation.findById(quotation._id));
+    return res.json({ quotation: out, emailError });
+  } catch (err) {
+    console.error("send quotation error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });
