@@ -38,6 +38,7 @@ function calculateLineItem(item = {}, index = 0) {
     currency: item.currency || "AED",
     taxable,
     taxRate: taxable ? taxRate : 0,
+    billingType: ["one_time", "monthly", "quarterly", "yearly", "custom"].includes(item.billingType) ? item.billingType : "one_time",
     lineSubtotal,
     taxAmount,
     lineTotal,

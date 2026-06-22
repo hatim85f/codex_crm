@@ -124,6 +124,7 @@ async function hydrateLineItems(req, rawItems = [], documentCurrency = "AED") {
       currency: item.currency || service?.currency || documentCurrency,
       taxable: item.taxable !== undefined ? item.taxable : service ? service.taxable : true,
       taxRate: item.taxRate !== undefined ? item.taxRate : service ? service.taxRate : 0,
+      billingType: item.billingType || service?.billingType || "one_time",
       sortOrder: item.sortOrder !== undefined ? item.sortOrder : i,
     };
     if (!merged.serviceName) throw new Error("Line item serviceName is required");

@@ -17,6 +17,7 @@ const LineItemSchema = new Schema(
     currency: { type: String, enum: CURRENCIES, default: "AED" },
     taxable: { type: Boolean, default: true },
     taxRate: { type: Number, default: 0, min: 0 },
+    billingType: { type: String, default: "one_time" }, // one_time = not ongoing; monthly/quarterly/yearly = recurring
     lineSubtotal: { type: Number, default: 0, min: 0 },
     taxAmount: { type: Number, default: 0, min: 0 },
     lineTotal: { type: Number, default: 0, min: 0 },
