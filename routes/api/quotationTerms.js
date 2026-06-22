@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 
 const router = express.Router();
 const QuotationTerm = require("../../models/QuotationTerm");
+const Service = require("../../models/Service");
 const { auth, requireRole } = require("../../middleware/auth");
 
 const VIEW = ["owner_admin", "admin", "sales", "team_leader"];
@@ -58,8 +59,15 @@ router.get("/", async (req, res) => {
 router.get("/applicable", async (req, res) => {
   try {
     const serviceIds = toIdArray(String(req.query.serviceIds || "").split(",").filter(Boolean));
-    const categoryIds = toIdArray(String(req.query.categoryIds || "").split(",").filter(Boolean));
+    let categoryIds = toIdArray(String(req.query.categoryIds || "").split(",").filter(Boolean));
     const { businessLine } = req.query;
+    // Resolve each selected service's category so appliesToServiceCategories matches
+    // even though the quotation form only sends serviceIds.
+    if (serviceIds.length) {
+      const svcs = await Service.find({ organization: req.user.organization, _id: { $in: serviceIds } }).select("categoryId").lean();
+      svcs.forEach((s) => { if (s.categoryId) categoryIds.push(String(s.categoryId)); });
+    }
+    categoryIds = Array.from(new Set(categoryIds.map(String)));
     const or = [{ isDefault: true }];
     if (serviceIds.length) or.push({ appliesToServices: { $in: serviceIds } });
     if (categoryIds.length) or.push({ appliesToServiceCategories: { $in: categoryIds } });

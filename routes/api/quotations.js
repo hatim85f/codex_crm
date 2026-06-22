@@ -14,7 +14,9 @@ const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
 const { nextDocumentNumber, nextQuotationNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
 const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
-const MANAGE = ["owner_admin", "admin", "sales"];
+// Only managers (owner_admin), admins, and team leaders can create/edit/send quotations.
+const MANAGE = ["owner_admin", "admin", "team_leader"];
+const DELETE_ROLES = ["owner_admin", "admin"];
 const STATUSES = ["draft", "sent", "accepted", "rejected", "expired", "cancelled", "converted_to_invoice"];
 const BODY_FIELDS = ["quotationNumber", "customerId", "contactId", "status", "issueDate", "validUntil", "currency", "businessLine", "discountType", "discountValue", "notes", "terms", "termsAndConditions", "scopeItems", "timeline", "paymentSchedule", "bankAccountId", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
 
@@ -454,6 +456,23 @@ router.post("/:id/create-invoice", requireRole("owner_admin", "admin"), async (r
     const code = err.status || (err.code === 11000 ? 409 : 500);
     if (code < 500) return res.status(code).json({ message: err.message });
     console.error("create invoice from quotation error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// DELETE /api/quotations/:id — removing it here also removes it from the customer
+// portal (the portal only lists existing shared quotations).
+router.delete("/:id", requireRole(...DELETE_ROLES), async (req, res) => {
+  try {
+    const quotation = await loadQuotation(req, res);
+    if (!quotation) return;
+    if (quotation.convertedToInvoiceId) {
+      return res.status(409).json({ message: "This quotation has an invoice. Delete the invoice first." });
+    }
+    await quotation.deleteOne();
+    return res.json({ ok: true, _id: quotation._id });
+  } catch (err) {
+    console.error("delete quotation error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });
