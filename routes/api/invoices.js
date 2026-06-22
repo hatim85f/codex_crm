@@ -5,11 +5,15 @@ const router = express.Router();
 const Invoice = require("../../models/Invoice");
 const Customer = require("../../models/Customer");
 const CustomerContact = require("../../models/CustomerContact");
+const User = require("../../models/User");
 const Quotation = require("../../models/Quotation");
 const Service = require("../../models/Service");
 const BankAccount = require("../../models/BankAccount");
 const { auth, requireRole } = require("../../middleware/auth");
 const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
+const { createNotifications } = require("../../services/notify");
+const { getStripe } = require("../../services/stripe");
+const webBase = () => process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
 const { nextDocumentNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
 const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
@@ -149,6 +153,42 @@ async function preparePayload(req, body = {}, existingId = null) {
   };
 }
 
+async function notifyCustomerPortalUsers({ organization, customerId, type, title, message, link, meta }) {
+  try {
+    const users = await User.find({ organization, userType: "customer", customerId }).select("_id");
+    await createNotifications({
+      organization,
+      recipientUserIds: users.map((u) => u._id),
+      audience: "customer",
+      type,
+      title,
+      message,
+      link,
+      meta,
+    });
+  } catch (e) {
+    console.error("invoice customer notification error:", e.message);
+  }
+}
+
+async function notifyInvoiceInternalUsers({ organization, invoice, type, title, message }) {
+  try {
+    const customer = await Customer.findOne({ _id: invoice.customerId, organization }).select("assignedTo");
+    await createNotifications({
+      organization,
+      recipientUserIds: [invoice.createdBy, customer?.assignedTo],
+      audience: "internal",
+      type,
+      title,
+      message,
+      link: `invoices/${invoice._id}`,
+      meta: { invoiceId: invoice._id, invoiceNumber: invoice.invoiceNumber, customerId: invoice.customerId },
+    });
+  } catch (e) {
+    console.error("invoice internal notification error:", e.message);
+  }
+}
+
 function populateInvoice(query) {
   return query
     .populate("customerId", "displayName companyName email")
@@ -186,6 +226,15 @@ router.post("/", requireRole(...MANAGE), async (req, res) => {
     applyStatusTimestamps(invoice, invoice.status);
     addHistory(invoice, "invoice.created", `Invoice ${invoice.invoiceNumber} created`, req);
     await invoice.save();
+    await notifyCustomerPortalUsers({
+      organization: req.user.organization,
+      customerId: invoice.customerId,
+      type: "invoice.created",
+      title: "New invoice",
+      message: `Invoice ${invoice.invoiceNumber} is available`,
+      link: `invoices/${invoice._id}`,
+      meta: { invoiceId: invoice._id, invoiceNumber: invoice.invoiceNumber },
+    });
     const out = await populateInvoice(Invoice.findById(invoice._id));
     return res.status(201).json(out);
   } catch (err) {
@@ -252,10 +301,27 @@ router.patch("/:id/status", requireRole(...MANAGE), async (req, res) => {
     const invoice = await loadInvoice(req, res);
     if (!invoice) return;
     invoice.status = status;
+    // "Mark as paid" should also settle the balance so it isn't paid-with-a-balance.
+    if (status === "paid") {
+      invoice.paidAmount = invoice.grandTotal;
+      invoice.balance = 0;
+      invoice.paidAt = invoice.paidAt || new Date();
+    }
     invoice.updatedBy = req.user.id;
     applyStatusTimestamps(invoice, status);
     addHistory(invoice, "invoice.status", `Invoice marked ${status}`, req);
     await invoice.save();
+    if (status === "sent") {
+      await notifyCustomerPortalUsers({
+        organization: req.user.organization,
+        customerId: invoice.customerId,
+        type: "invoice.sent",
+        title: "Invoice sent",
+        message: `Invoice ${invoice.invoiceNumber} is available`,
+        link: `invoices/${invoice._id}`,
+        meta: { invoiceId: invoice._id, invoiceNumber: invoice.invoiceNumber },
+      });
+    }
     const out = await populateInvoice(Invoice.findById(invoice._id));
     return res.json(out);
   } catch (err) {
@@ -270,6 +336,7 @@ router.patch("/:id/record-payment", requireRole(...MANAGE), async (req, res) => 
     if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: "Payment amount must be greater than 0" });
     const invoice = await loadInvoice(req, res);
     if (!invoice) return;
+    const wasPaid = invoice.status === "paid";
     invoice.paidAmount = roundMoney(Number(invoice.paidAmount || 0) + amount);
     if (req.body?.paymentMethod !== undefined) invoice.paymentMethod = req.body.paymentMethod;
     if (req.body?.bankTransferReceipt !== undefined) invoice.bankTransferReceipt = req.body.bankTransferReceipt;
@@ -284,6 +351,22 @@ router.patch("/:id/record-payment", requireRole(...MANAGE), async (req, res) => 
     invoice.updatedBy = req.user.id;
     addHistory(invoice, "invoice.payment_recorded", `Payment recorded: ${amount}`, req);
     await invoice.save();
+    await notifyInvoiceInternalUsers({
+      organization: req.user.organization,
+      invoice,
+      type: "invoice.payment_recorded",
+      title: "Payment recorded",
+      message: `Payment recorded for invoice ${invoice.invoiceNumber}`,
+    });
+    if (!wasPaid && invoice.status === "paid") {
+      await notifyInvoiceInternalUsers({
+        organization: req.user.organization,
+        invoice,
+        type: "invoice.paid",
+        title: "Invoice paid",
+        message: `Invoice ${invoice.invoiceNumber} is fully paid`,
+      });
+    }
     const out = await populateInvoice(Invoice.findById(invoice._id));
     return res.json(out);
   } catch (err) {
@@ -292,4 +375,63 @@ router.patch("/:id/record-payment", requireRole(...MANAGE), async (req, res) => 
   }
 });
 
+// POST /api/invoices/:id/payment-link — create a Stripe Checkout link for the balance.
+router.post("/:id/payment-link", requireRole(...MANAGE), async (req, res) => {
+  try {
+    const stripe = getStripe();
+    if (!stripe) return res.status(503).json({ message: "Stripe is not configured. Set STRIPE_SECRET_KEY on the server." });
+    const invoice = await loadInvoice(req, res);
+    if (!invoice) return;
+    const amountDue = roundMoney(invoice.balance > 0 ? invoice.balance : invoice.grandTotal);
+    if (amountDue <= 0) return res.status(400).json({ message: "This invoice has nothing left to pay." });
+    const base = webBase();
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: [{
+        price_data: {
+          currency: String(invoice.currency || "AED").toLowerCase(),
+          product_data: { name: `Invoice ${invoice.invoiceNumber}` },
+          unit_amount: Math.round(amountDue * 100),
+        },
+        quantity: 1,
+      }],
+      metadata: { invoiceId: String(invoice._id), invoiceNumber: invoice.invoiceNumber },
+      success_url: `${base}/portal/invoices?paid=${invoice._id}`,
+      cancel_url: `${base}/portal/invoices`,
+    });
+    invoice.paymentLink = session.url;
+    invoice.updatedBy = req.user.id;
+    addHistory(invoice, "invoice.payment_link", "Payment link generated", req);
+    await invoice.save();
+    return res.json({ url: session.url });
+  } catch (err) {
+    console.error("payment link error:", err.message);
+    return res.status(500).json({ message: err.message || "Could not create payment link" });
+  }
+});
+
+// DELETE /api/invoices/:id
+router.delete("/:id", requireRole(...MANAGE), async (req, res) => {
+  try {
+    const invoice = await loadInvoice(req, res);
+    if (!invoice) return;
+    // detach from its quotation so the quotation can be re-invoiced
+    if (invoice.quotationId) {
+      try {
+        const Quotation = require("../../models/Quotation");
+        await Quotation.updateOne(
+          { _id: invoice.quotationId, organization: req.user.organization, convertedToInvoiceId: invoice._id },
+          { $set: { status: "accepted", convertedToInvoiceId: null } }
+        );
+      } catch (e) { /* best effort */ }
+    }
+    await invoice.deleteOne();
+    return res.json({ ok: true, _id: invoice._id });
+  } catch (err) {
+    console.error("delete invoice error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;
+

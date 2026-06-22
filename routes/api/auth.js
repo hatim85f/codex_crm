@@ -10,6 +10,26 @@ const Customer = require("../../models/Customer");
 const Quotation = require("../../models/Quotation");
 const { auth, getSecret } = require("../../middleware/auth");
 const { logActivity } = require("../../services/activityLog");
+const { createNotifications } = require("../../services/notify");
+
+async function notifyQuotationResponse({ user, quotation, action }) {
+  try {
+    const customer = await Customer.findOne({ _id: quotation.customerId, organization: user.organization }).select("displayName assignedTo");
+    const verb = action === "accept" ? "accepted" : "rejected";
+    await createNotifications({
+      organization: user.organization,
+      recipientUserIds: [quotation.createdBy, customer?.assignedTo],
+      audience: "internal",
+      type: action === "accept" ? "quotation.accepted" : "quotation.rejected",
+      title: action === "accept" ? "Quotation accepted" : "Quotation rejected",
+      message: `${customer?.displayName || user.name} ${verb} quotation ${quotation.quotationNumber}`,
+      link: `quotations/${quotation._id}`,
+      meta: { quotationId: quotation._id, quotationNumber: quotation.quotationNumber, customerId: quotation.customerId },
+    });
+  } catch (e) {
+    console.error("quotation response notification error:", e.message);
+  }
+}
 
 const signToken = (user) =>
   jwt.sign(
@@ -218,6 +238,7 @@ router.patch("/my-quotations/:id/respond", auth, async (req, res) => {
       actorId: user._id,
       actorName: user.name,
     });
+    await notifyQuotationResponse({ user, quotation, action });
 
     const out = await Quotation.findById(quotation._id)
       .populate("customerId", "displayName companyName email phone tax")
@@ -276,3 +297,4 @@ router.post("/activate-account", async (req, res) => {
 });
 
 module.exports = router;
+

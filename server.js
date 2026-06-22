@@ -8,6 +8,8 @@ const connectDB = require("./config/db");
 const app = express();
 
 app.use(cors());
+// Stripe webhook needs the raw request body for signature verification — mount before json.
+app.use("/api/stripe", require("./routes/api/stripe"));
 app.use(express.json());
 
 connectDB();
@@ -26,6 +28,7 @@ app.use("/api/services", require("./routes/api/services"));
 app.use("/api/quotation-terms", require("./routes/api/quotationTerms"));
 app.use("/api/quotations", require("./routes/api/quotations"));
 app.use("/api/invoices", require("./routes/api/invoices"));
+app.use("/api/notifications", require("./routes/api/notifications"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
@@ -36,6 +39,8 @@ process.on("SIGINT", async () => {
   await mongoose.connection.close();
   process.exit(0);
 });
+
+
 
 
 

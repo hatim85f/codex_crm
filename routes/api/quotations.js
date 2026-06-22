@@ -6,10 +6,12 @@ const Quotation = require("../../models/Quotation");
 const Invoice = require("../../models/Invoice");
 const Customer = require("../../models/Customer");
 const CustomerContact = require("../../models/CustomerContact");
+const User = require("../../models/User");
 const Service = require("../../models/Service");
 const BankAccount = require("../../models/BankAccount");
 const { auth, requireRole } = require("../../middleware/auth");
 const { sendQuotationPortal } = require("../../services/emailService");
+const { createNotifications } = require("../../services/notify");
 const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
 const { nextDocumentNumber, nextQuotationNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
@@ -183,6 +185,24 @@ function populateQuotation(query) {
     .populate("convertedToInvoiceId", "invoiceNumber status grandTotal balance");
 }
 
+async function notifyCustomerPortalUsers({ organization, customerId, type, title, message, link, meta }) {
+  try {
+    const users = await User.find({ organization, userType: "customer", customerId }).select("_id");
+    await createNotifications({
+      organization,
+      recipientUserIds: users.map((u) => u._id),
+      audience: "customer",
+      type,
+      title,
+      message,
+      link,
+      meta,
+    });
+  } catch (e) {
+    console.error("quotation notification error:", e.message);
+  }
+}
+
 async function loadQuotation(req, res) {
   const quotation = await Quotation.findById(req.params.id);
   if (!quotation || String(quotation.organization) !== String(req.user.organization)) {
@@ -304,6 +324,15 @@ router.post("/:id/send", requireRole(...MANAGE), async (req, res) => {
     const channels = [portal && "portal", email && "email"].filter(Boolean).join(" + ");
     addHistory(quotation, "quotation.sent", `Quotation sent (${channels})`, req);
     await quotation.save();
+    await notifyCustomerPortalUsers({
+      organization: req.user.organization,
+      customerId: quotation.customerId,
+      type: "quotation.sent",
+      title: "New quotation",
+      message: `Quotation ${quotation.quotationNumber} is available`,
+      link: `quotations/${quotation._id}`,
+      meta: { quotationId: quotation._id, quotationNumber: quotation.quotationNumber },
+    });
 
     let emailError = null;
     if (email) {
@@ -461,7 +490,7 @@ router.post("/:id/create-invoice", requireRole("owner_admin", "admin"), async (r
   }
 });
 
-// DELETE /api/quotations/:id — removing it here also removes it from the customer
+// DELETE /api/quotations/:id ??? removing it here also removes it from the customer
 // portal (the portal only lists existing shared quotations).
 router.delete("/:id", requireRole(...DELETE_ROLES), async (req, res) => {
   try {
@@ -479,4 +508,6 @@ router.delete("/:id", requireRole(...DELETE_ROLES), async (req, res) => {
 });
 
 module.exports = router;
+
+
 
