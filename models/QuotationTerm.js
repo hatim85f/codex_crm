@@ -5,7 +5,6 @@ const { Schema } = mongoose;
 // Reusable, manageable quotation terms & conditions. These are *templates*: when a
 // quotation is created the selected terms are COPIED into the quotation document, so
 // editing a template here never changes terms on already-saved quotations.
-// edits for redeploy
 const QuotationTermSchema = new Schema(
   {
     organization: {
