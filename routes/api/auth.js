@@ -164,10 +164,68 @@ router.get("/my-quotations", auth, async (req, res) => {
     })
       .populate("customerId", "displayName companyName email phone tax")
       .populate("contactId", "name email phone")
+      .populate("bankAccountId", "bankName accountHolderName accountNumber iban swift currency isPrimary logo branch")
       .sort({ createdAt: -1 });
     return res.json(quotations);
   } catch (err) {
     console.error("my-quotations error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PATCH /api/auth/my-quotations/:id/respond  { action: "accept" | "reject", reason? }
+// Lets the portal customer accept or reject a quotation that was shared to them.
+router.patch("/my-quotations/:id/respond", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || user.userType !== "customer" || !user.customerId) {
+      return res.status(403).json({ message: "Not a customer account" });
+    }
+    const { action, reason } = req.body || {};
+    if (!["accept", "reject"].includes(action)) {
+      return res.status(400).json({ message: "action must be 'accept' or 'reject'" });
+    }
+    const quotation = await Quotation.findById(req.params.id);
+    if (
+      !quotation ||
+      String(quotation.organization) !== String(user.organization) ||
+      String(quotation.customerId) !== String(user.customerId) ||
+      !quotation.sharedToPortal
+    ) {
+      return res.status(404).json({ message: "Quotation not found" });
+    }
+    if (quotation.status !== "sent") {
+      return res.status(400).json({ message: "This quotation can no longer be accepted or rejected." });
+    }
+
+    const now = new Date();
+    if (action === "accept") {
+      quotation.status = "accepted";
+      quotation.acceptedAt = now;
+      quotation.history.push({ action: "quotation.accepted", message: `Accepted by ${user.name} (client)`, userId: user._id, at: now });
+    } else {
+      quotation.status = "rejected";
+      quotation.rejectedAt = now;
+      quotation.history.push({ action: "quotation.rejected", message: `Rejected by ${user.name} (client)${reason ? `: ${reason}` : ""}`, userId: user._id, at: now });
+    }
+    await quotation.save();
+
+    logActivity({
+      organization: user.organization,
+      customerId: user.customerId,
+      type: action === "accept" ? "quotation.accepted" : "quotation.rejected",
+      message: `${user.name} ${action === "accept" ? "accepted" : "rejected"} quotation ${quotation.quotationNumber}${action === "reject" && reason ? ` (${reason})` : ""}`,
+      actorId: user._id,
+      actorName: user.name,
+    });
+
+    const out = await Quotation.findById(quotation._id)
+      .populate("customerId", "displayName companyName email phone tax")
+      .populate("contactId", "name email phone")
+      .populate("bankAccountId", "bankName accountHolderName accountNumber iban swift currency isPrimary logo branch");
+    return res.json(out);
+  } catch (err) {
+    console.error("respond quotation error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });

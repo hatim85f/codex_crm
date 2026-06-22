@@ -7,7 +7,7 @@ const { auth, requireRole } = require("../../middleware/auth");
 
 const VIEW = ["owner_admin", "admin", "sales", "team_leader"];
 const MANAGE = ["owner_admin", "admin"];
-const FIELDS = ["title", "body", "category", "appliesToServices", "appliesToServiceCategories", "businessLine", "isDefault", "isActive", "sortOrder"];
+const FIELDS = ["title", "body", "categories", "appliesToServices", "appliesToServiceCategories", "businessLine", "isDefault", "isActive", "sortOrder"];
 
 router.use(auth);
 router.use(requireRole(...VIEW));
@@ -19,6 +19,11 @@ function normalizeBody(body = {}) {
   const out = {};
   FIELDS.forEach((f) => { if (body[f] !== undefined) out[f] = body[f]; });
   if (out.title) out.title = String(out.title).trim();
+  if (out.categories !== undefined) {
+    const arr = (Array.isArray(out.categories) ? out.categories : [out.categories])
+      .map((c) => String(c || "").trim()).filter(Boolean);
+    out.categories = arr.length ? Array.from(new Set(arr)) : ["general"];
+  }
   if (out.appliesToServices !== undefined) out.appliesToServices = toIdArray(out.appliesToServices);
   if (out.appliesToServiceCategories !== undefined) out.appliesToServiceCategories = toIdArray(out.appliesToServiceCategories);
   if (out.isDefault !== undefined) out.isDefault = !!out.isDefault;
@@ -32,7 +37,7 @@ router.get("/", async (req, res) => {
   try {
     const { category, businessLine, active, search } = req.query;
     const query = { organization: req.user.organization };
-    if (category) query.category = category;
+    if (category) query.categories = category; // matches terms that include this category
     if (businessLine) query.businessLine = businessLine;
     if (active === "true") query.isActive = true;
     if (active === "false") query.isActive = false;

@@ -7,6 +7,7 @@ const Invoice = require("../../models/Invoice");
 const Customer = require("../../models/Customer");
 const CustomerContact = require("../../models/CustomerContact");
 const Service = require("../../models/Service");
+const BankAccount = require("../../models/BankAccount");
 const { auth, requireRole } = require("../../middleware/auth");
 const { sendQuotationPortal } = require("../../services/emailService");
 const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
@@ -15,7 +16,27 @@ const { nextDocumentNumber, nextQuotationNumber, nextInvoiceNumber, ensureManual
 const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const MANAGE = ["owner_admin", "admin", "sales"];
 const STATUSES = ["draft", "sent", "accepted", "rejected", "expired", "cancelled", "converted_to_invoice"];
-const BODY_FIELDS = ["quotationNumber", "customerId", "contactId", "status", "issueDate", "validUntil", "currency", "businessLine", "discountType", "discountValue", "notes", "terms", "termsAndConditions", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
+const BODY_FIELDS = ["quotationNumber", "customerId", "contactId", "status", "issueDate", "validUntil", "currency", "businessLine", "discountType", "discountValue", "notes", "terms", "termsAndConditions", "scopeItems", "timeline", "paymentSchedule", "bankAccountId", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
+
+function sanitizeScope(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((it) => ({
+      text: String((it && it.text) || "").trim(),
+      children: (it && Array.isArray(it.children) ? it.children : []).map((c) => String(c || "").trim()).filter(Boolean),
+    }))
+    .filter((it) => it.text);
+}
+
+function sanitizeSchedule(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((s) => ({
+      label: String((s && s.label) || "").trim(),
+      percentage: Math.max(0, Math.min(100, Number((s && s.percentage)) || 0)),
+    }))
+    .filter((s) => s.label || s.percentage);
+}
 
 // Terms are copied (not referenced) into the quotation so they are frozen at save time.
 function sanitizeTerms(raw) {
@@ -114,6 +135,13 @@ async function preparePayload(req, body = {}, existingId = null) {
   if (!body.currency) throw new Error("currency is required");
   if (!body.businessLine) throw new Error("businessLine is required");
   await validateCustomerAndContact(req, body.customerId, body.contactId);
+  let bankAccountId = null;
+  if (body.bankAccountId) {
+    if (!mongoose.Types.ObjectId.isValid(body.bankAccountId)) throw new Error("Valid bankAccountId is required");
+    const bank = await BankAccount.findById(body.bankAccountId).select("organization");
+    if (!bank || String(bank.organization) !== String(req.user.organization)) throw new Error("Bank account not found");
+    bankAccountId = body.bankAccountId;
+  }
   if (body.quotationNumber) await ensureManualNumberAvailable(Quotation, req.user.organization, "quotationNumber", String(body.quotationNumber).trim(), existingId);
   const hydratedItems = await hydrateLineItems(req, body.lineItems, body.currency);
   const totals = calculateDocument(hydratedItems, body.discountType, body.discountValue);
@@ -130,6 +158,10 @@ async function preparePayload(req, body = {}, existingId = null) {
     notes: body.notes || "",
     terms: body.terms || "",
     termsAndConditions: sanitizeTerms(body.termsAndConditions),
+    scopeItems: sanitizeScope(body.scopeItems),
+    timeline: body.timeline ? String(body.timeline).trim() : "",
+    paymentSchedule: sanitizeSchedule(body.paymentSchedule),
+    bankAccountId,
     internalNotes: body.internalNotes || "",
     pdfUrl: body.pdfUrl || "",
     emailSentAt: body.emailSentAt || null,
@@ -142,6 +174,7 @@ function populateQuotation(query) {
   return query
     .populate({ path: "customerId", select: "displayName companyName email phone tax assignedTo", populate: { path: "assignedTo", select: "name phone email" } })
     .populate("contactId", "name email phone")
+    .populate("bankAccountId", "bankName accountHolderName accountNumber iban swift currency isPrimary logo branch")
     .populate("createdBy", "name email")
     .populate("updatedBy", "name email")
     .populate("convertedToInvoiceId", "invoiceNumber status grandTotal balance");
@@ -328,6 +361,10 @@ router.post("/:id/duplicate", requireRole(...MANAGE), async (req, res) => {
       notes: source.notes,
       terms: source.terms,
       termsAndConditions: source.termsAndConditions.map((t) => (t.toObject ? t.toObject() : t)),
+      scopeItems: source.scopeItems.map((s) => (s.toObject ? s.toObject() : s)),
+      timeline: source.timeline,
+      paymentSchedule: source.paymentSchedule.map((s) => (s.toObject ? s.toObject() : s)),
+      bankAccountId: source.bankAccountId,
       internalNotes: source.internalNotes,
       createdBy: req.user.id,
       updatedBy: req.user.id,

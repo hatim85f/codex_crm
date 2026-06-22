@@ -48,6 +48,24 @@ const TermLineSchema = new Schema(
   { _id: false }
 );
 
+// "Scope of work includes" — bullets with optional sub-bullets.
+const ScopeItemSchema = new Schema(
+  {
+    text: { type: String, required: true, trim: true },
+    children: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
+// Payment schedule slabs (first slab is the down payment). Percentages should total 100.
+const PaymentSlabSchema = new Schema(
+  {
+    label: { type: String, default: "", trim: true },
+    percentage: { type: Number, default: 0, min: 0, max: 100 },
+  },
+  { _id: false }
+);
+
 const QuotationSchema = new Schema(
   {
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
@@ -69,6 +87,10 @@ const QuotationSchema = new Schema(
     notes: { type: String, default: "" },
     terms: { type: String, default: "" },
     termsAndConditions: { type: [TermLineSchema], default: [] },
+    scopeItems: { type: [ScopeItemSchema], default: [] },
+    timeline: { type: String, default: "" },
+    paymentSchedule: { type: [PaymentSlabSchema], default: [] },
+    bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount", default: null },
     internalNotes: { type: String, default: "" },
     pdfUrl: { type: String, default: "" },
     emailSentAt: { type: Date, default: null },

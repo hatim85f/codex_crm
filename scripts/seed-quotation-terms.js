@@ -36,7 +36,7 @@ const run = async () => {
       organization: org._id,
       title: t.title,
       body: t.body,
-      category: t.category,
+      categories: [t.category],
       isDefault: true,
       isActive: true,
       sortOrder: i + 1,

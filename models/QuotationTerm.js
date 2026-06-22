@@ -10,7 +10,8 @@ const QuotationTermSchema = new Schema(
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
     title: { type: String, required: true, trim: true },
     body: { type: String, required: true },
-    category: { type: String, default: "general", trim: true },
+    categories: { type: [String], default: ["general"] }, // a term can belong to several categories
+
     appliesToServices: [{ type: Schema.Types.ObjectId, ref: "Service" }],
     appliesToServiceCategories: [{ type: Schema.Types.ObjectId, ref: "ServiceCategory" }],
     businessLine: { type: String, default: "", trim: true },
