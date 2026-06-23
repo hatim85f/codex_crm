@@ -10,7 +10,8 @@ const Customer = require("../../models/Customer");
 const Quotation = require("../../models/Quotation");
 const Invoice = require("../../models/Invoice");
 const { auth, getSecret } = require("../../middleware/auth");
-const { createInvoiceCheckoutUrl } = require("../../services/stripe");
+const { getStripe, createInvoiceCheckoutUrl } = require("../../services/stripe");
+const { applyStripePayment } = require("../../services/invoicePayment");
 const portalWebBase = () => process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
 const { logActivity } = require("../../services/activityLog");
 const { createNotifications } = require("../../services/notify");
@@ -278,6 +279,41 @@ router.get("/my-invoices", auth, async (req, res) => {
   }
 });
 
+// POST /api/auth/my-invoices/:id/confirm-payment -> verify Stripe return and settle the invoice
+router.post("/my-invoices/:id/confirm-payment", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || user.userType !== "customer" || !user.customerId) {
+      return res.status(403).json({ message: "Not a customer account" });
+    }
+    const invoice = await Invoice.findOne({
+      _id: req.params.id,
+      organization: user.organization,
+      customerId: user.customerId,
+      sharedToPortal: true,
+    });
+    if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+    if (invoice.status === "paid" || Number(invoice.balance || 0) <= 0) return res.json(invoice);
+
+    const sessionId = String(req.body?.sessionId || "").trim();
+    if (!sessionId) return res.status(400).json({ message: "Stripe session is required" });
+    const stripe = getStripe();
+    if (!stripe) return res.status(503).json({ message: "Online payment is not available right now." });
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (String(session.metadata?.invoiceId || "") !== String(invoice._id)) {
+      return res.status(400).json({ message: "Payment does not match this invoice" });
+    }
+    if (session.payment_status !== "paid") {
+      return res.status(409).json({ message: "Payment is still processing" });
+    }
+    await applyStripePayment(invoice, session);
+    return res.json(invoice);
+  } catch (err) {
+    console.error("confirm my-invoice payment error:", err.message);
+    return res.status(500).json({ message: "Could not confirm payment" });
+  }
+});
 // POST /api/auth/my-invoices/:id/pay -> customer creates a Stripe checkout link for their own invoice
 router.post("/my-invoices/:id/pay", auth, async (req, res) => {
   try {
