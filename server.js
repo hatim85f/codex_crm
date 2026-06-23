@@ -28,6 +28,7 @@ app.use("/api/services", require("./routes/api/services"));
 app.use("/api/quotation-terms", require("./routes/api/quotationTerms"));
 app.use("/api/quotations", require("./routes/api/quotations"));
 app.use("/api/invoices", require("./routes/api/invoices"));
+app.use("/api/projects", require("./routes/api/projects"));
 app.use("/api/notifications", require("./routes/api/notifications"));
 
 const PORT = process.env.PORT || 5000;

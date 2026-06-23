@@ -182,7 +182,8 @@ function populateQuotation(query) {
     .populate("bankAccountId", "bankName accountHolderName accountNumber iban swift currency isPrimary logo branch")
     .populate("createdBy", "name email")
     .populate("updatedBy", "name email")
-    .populate("convertedToInvoiceId", "invoiceNumber status grandTotal balance");
+    .populate("convertedToInvoiceId", "invoiceNumber status grandTotal balance")
+    .populate("convertedToProjectId", "projectName status progress");
 }
 
 async function notifyCustomerPortalUsers({ organization, customerId, type, title, message, link, meta }) {
