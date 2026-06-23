@@ -14,7 +14,7 @@ const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
 const { createNotifications } = require("../../services/notify");
 const { getStripe, createInvoiceCheckoutUrl } = require("../../services/stripe");
 const { sendInvoicePortal } = require("../../services/emailService");
-const webBase = () => process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
+const { requestWebBase } = require("../../services/publicWeb");
 const { nextDocumentNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
 const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
@@ -382,7 +382,7 @@ router.post("/:id/payment-link", requireRole(...MANAGE), async (req, res) => {
     if (!getStripe()) return res.status(503).json({ message: "Stripe is not configured. Set STRIPE_SECRET_KEY on the server." });
     const invoice = await loadInvoice(req, res);
     if (!invoice) return;
-    const url = await createInvoiceCheckoutUrl(invoice, webBase());
+    const url = await createInvoiceCheckoutUrl(invoice, requestWebBase(req));
     if (!url) return res.status(400).json({ message: "This invoice has nothing left to pay." });
     invoice.paymentLink = url;
     invoice.updatedBy = req.user.id;
@@ -407,13 +407,12 @@ router.post("/:id/send", requireRole(...MANAGE), async (req, res) => {
     const invoice = await loadInvoice(req, res);
     if (!invoice) return;
     if (portal) { invoice.sharedToPortal = true; invoice.sharedToPortalAt = new Date(); }
-    if (email) invoice.emailSentAt = new Date();
     if (invoice.status === "draft") { invoice.status = "sent"; if (!invoice.sentAt) invoice.sentAt = new Date(); }
 
     // Ensure we have a payment link (for the email + portal Pay Now).
     let paymentLink = invoice.paymentLink;
-    if (!paymentLink && invoice.balance > 0) {
-      try { paymentLink = await createInvoiceCheckoutUrl(invoice, webBase()); if (paymentLink) invoice.paymentLink = paymentLink; } catch (e) { /* non-fatal */ }
+    if (invoice.balance > 0) {
+      try { paymentLink = await createInvoiceCheckoutUrl(invoice, requestWebBase(req)); if (paymentLink) invoice.paymentLink = paymentLink; } catch (e) { /* non-fatal */ }
     }
     invoice.updatedBy = req.user.id;
     addHistory(invoice, "invoice.sent", `Invoice sent (${[portal && "portal", email && "email"].filter(Boolean).join(" + ")})`, req);
@@ -430,28 +429,51 @@ router.post("/:id/send", requireRole(...MANAGE), async (req, res) => {
     });
 
     let emailError = null;
+    let emailRecipients = [];
+    let emailMessageId = null;
     if (email) {
       const populated = await populateInvoice(Invoice.findById(invoice._id));
       const contact = populated.contactId;
       const customer = populated.customerId;
-      const recipient = contact?.email || customer?.email;
-      if (!recipient) emailError = "No email address found for this customer or contact.";
+      const portalUsers = await User.find({
+        organization: req.user.organization,
+        customerId: invoice.customerId,
+        userType: "customer",
+        status: { $ne: "inactive" },
+      }).select("name email");
+      const candidates = [
+        ...portalUsers.map((user) => ({ email: user.email, name: user.name })),
+        { email: contact?.email, name: contact?.name },
+        { email: customer?.email, name: customer?.displayName || customer?.companyName },
+      ];
+      const unique = new Map();
+      candidates.forEach((recipient) => {
+        const address = String(recipient.email || "").trim().toLowerCase();
+        if (address && !unique.has(address)) unique.set(address, { email: address, name: recipient.name || address });
+      });
+      const recipients = [...unique.values()];
+      emailRecipients = recipients.map((recipient) => recipient.email);
+      if (!recipients.length) emailError = "No email address found for this customer, contact, or portal user.";
       else {
-        const parts = String(contact?.name || customer?.displayName || "").trim().split(/\s+/);
+        const parts = String(recipients[0].name || "").trim().split(/\s+/);
         try {
-          await sendInvoicePortal({
-            email: recipient,
+          const delivery = await sendInvoicePortal({
+            recipients,
             firstName: parts[0] || "",
             lastName: parts.slice(1).join(" "),
             invoiceNumber: invoice.invoiceNumber,
-            paymentLink: paymentLink || `${webBase()}/portal/invoices`,
+            paymentLink: paymentLink || `${requestWebBase(req)}/portal/invoices`,
           });
+          emailMessageId = delivery?.messageId || null;
+          invoice.emailSentAt = new Date();
+          addHistory(invoice, "invoice.email_accepted", `Invoice email accepted for ${emailRecipients.join(", ")}`, req);
+          await invoice.save();
         } catch (e) { emailError = e.message || "Failed to send email"; }
       }
     }
 
     const out = await populateInvoice(Invoice.findById(invoice._id));
-    return res.json({ invoice: out, emailError });
+    return res.json({ invoice: out, emailError, emailRecipients, emailMessageId });
   } catch (err) {
     console.error("send invoice error:", err.message);
     return res.status(500).json({ message: "Server error" });

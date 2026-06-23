@@ -12,7 +12,7 @@ const Invoice = require("../../models/Invoice");
 const { auth, getSecret } = require("../../middleware/auth");
 const { getStripe, createInvoiceCheckoutUrl } = require("../../services/stripe");
 const { applyStripePayment } = require("../../services/invoicePayment");
-const portalWebBase = () => process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
+const { requestWebBase } = require("../../services/publicWeb");
 const { logActivity } = require("../../services/activityLog");
 const { createNotifications } = require("../../services/notify");
 
@@ -326,7 +326,7 @@ router.post("/my-invoices/:id/pay", auth, async (req, res) => {
       return res.status(404).json({ message: "Invoice not found" });
     }
     if (!(invoice.balance > 0)) return res.status(400).json({ message: "This invoice is already paid." });
-    const url = await createInvoiceCheckoutUrl(invoice, portalWebBase());
+    const url = await createInvoiceCheckoutUrl(invoice, requestWebBase(req));
     if (!url) return res.status(503).json({ message: "Online payment is not available right now." });
     invoice.paymentLink = url;
     await invoice.save();

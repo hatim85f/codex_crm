@@ -12,7 +12,7 @@ const TEMPLATES = {
 };
 
 async function sendBrevoEmail({ templateId, to, params }) {
-  const key = process.env.BREVO_KEY;
+  const key = process.env.BREVO_KEY || process.env.BREVO_API_KEY;
   if (!key) {
     console.error("BREVO_KEY missing — cannot send email");
     throw new Error("Email service not configured");
@@ -79,10 +79,13 @@ function sendQuotationPortal({ email, firstName, lastName, assignedPerso, assign
 }
 
 // Invoice available on portal — Brevo template #10
-function sendInvoicePortal({ email, firstName, lastName, invoiceNumber, paymentLink }) {
+function sendInvoicePortal({ email, recipients, firstName, lastName, invoiceNumber, paymentLink }) {
+  const to = Array.isArray(recipients) && recipients.length
+    ? recipients
+    : { email, name: `${firstName || ""} ${lastName || ""}`.trim() || email };
   return sendBrevoEmail({
     templateId: TEMPLATES.INVOICE_PORTAL,
-    to: { email, name: `${firstName || ""} ${lastName || ""}`.trim() || email },
+    to,
     params: {
       firstName: firstName || "",
       lastName: lastName || "",
