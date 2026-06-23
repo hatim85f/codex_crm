@@ -41,6 +41,9 @@ const ProjectSchema = new Schema(
     projectLeaderId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     assignedMembers: [{ type: Schema.Types.ObjectId, ref: "User" }],
     progress: { type: Number, default: 0, min: 0, max: 100 },
+    // Steps (Phase 2): when a project has steps, progress is computed from weighted steps.
+    hasSteps: { type: Boolean, default: false },
+    progressCalculationMode: { type: String, enum: ["manual", "steps"], default: "steps" },
     notes: { type: String, default: "" },
     internalNotes: { type: String, default: "" },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
