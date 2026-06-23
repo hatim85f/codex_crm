@@ -35,7 +35,7 @@ async function createInvoiceCheckoutUrl(invoice, webBaseUrl) {
       quantity: 1,
     }],
     metadata: { invoiceId: String(invoice._id), invoiceNumber: invoice.invoiceNumber },
-    success_url: `${base}/portal/invoices?paid=${invoice._id}`,
+    success_url: `${base}/portal/invoices?paid=${invoice._id}&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${base}/portal/invoices`,
   });
   return session.url;
