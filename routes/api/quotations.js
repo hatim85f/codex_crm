@@ -419,14 +419,23 @@ router.post("/:id/create-invoice", requireRole("owner_admin", "admin"), async (r
     const quotation = await loadQuotation(req, res);
     if (!quotation) return;
     if (quotation.status !== "accepted") return res.status(400).json({ message: "Only accepted quotations can be converted to invoices" });
-    if (quotation.convertedToInvoiceId) return res.status(409).json({ message: "Quotation already has an invoice" });
+    // A quotation can be invoiced in parts (e.g. down payment then balance). It stays
+    // selectable until the total invoiced reaches its grand total.
+    const priors = await Invoice.find({ organization: req.user.organization, quotationId: quotation._id }).select("grandTotal").lean();
+    const alreadyInvoiced = roundMoney(priors.reduce((s, i) => s + Number(i.grandTotal || 0), 0));
+    const remaining = roundMoney(Math.max(0, quotation.grandTotal - alreadyInvoiced));
+    if (remaining <= 0) return res.status(409).json({ message: "This quotation is already fully invoiced." });
+
+    let amount = req.body?.amount != null && req.body.amount !== "" ? Number(req.body.amount) : remaining;
+    if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ message: "Invoice amount must be greater than 0" });
+    amount = roundMoney(Math.min(amount, remaining));
+    // Full, first-time invoice keeps the detailed line items; a partial/balance invoice is a single line.
+    const isFullSingle = alreadyInvoiced === 0 && amount >= roundMoney(quotation.grandTotal);
+
     const invoiceNumber = req.body?.invoiceNumber
       ? String(req.body.invoiceNumber).trim()
       : await nextInvoiceNumber(Invoice, req.user.organization, quotation.customerId, req.body?.issueDate || new Date());
     await ensureManualNumberAvailable(Invoice, req.user.organization, "invoiceNumber", invoiceNumber);
-    if (req.body?.status && !["draft", "sent", "partially_paid", "paid", "overdue", "cancelled", "pending_bank_verification"].includes(req.body.status)) {
-      return res.status(400).json({ message: "Invalid invoice status" });
-    }
     if (req.body?.bankAccountId) {
       if (!mongoose.Types.ObjectId.isValid(req.body.bankAccountId)) return res.status(400).json({ message: "Valid bankAccountId is required" });
       const bank = await BankAccount.findById(req.body.bankAccountId).select("organization");
@@ -434,27 +443,42 @@ router.post("/:id/create-invoice", requireRole("owner_admin", "admin"), async (r
     }
     const paidAmount = Number(req.body?.paidAmount || 0);
     if (paidAmount < 0) return res.status(400).json({ message: "paidAmount cannot be negative" });
-    const balance = roundMoney(Math.max(0, quotation.grandTotal - paidAmount));
+
+    let lineItems; let subtotal; let taxTotal; let discountType; let discountValue; let discountAmount; let invGrand;
+    if (isFullSingle) {
+      lineItems = quotation.lineItems.map((item) => (item.toObject ? item.toObject() : item));
+      subtotal = quotation.subtotal; taxTotal = quotation.taxTotal;
+      discountType = quotation.discountType; discountValue = quotation.discountValue; discountAmount = quotation.discountAmount;
+      invGrand = quotation.grandTotal;
+    } else {
+      const label = (req.body?.description && String(req.body.description).trim())
+        || (alreadyInvoiced > 0 ? `Balance — ${quotation.quotationNumber}` : `Advance / part payment — ${quotation.quotationNumber}`);
+      lineItems = [{
+        serviceId: null, serviceName: label,
+        description: `Part of quotation ${quotation.quotationNumber} (total ${quotation.currency} ${quotation.grandTotal}, already invoiced ${quotation.currency} ${alreadyInvoiced})`,
+        quantity: 1, unitLabel: "item", unitPrice: amount, currency: quotation.currency,
+        taxable: false, taxRate: 0, billingType: "one_time", lineSubtotal: amount, taxAmount: 0, lineTotal: amount, sortOrder: 0,
+      }];
+      subtotal = amount; taxTotal = 0; discountType = "none"; discountValue = 0; discountAmount = 0; invGrand = amount;
+    }
+    const balance = roundMoney(Math.max(0, invGrand - paidAmount));
+    const status = paidAmount >= invGrand && invGrand > 0 ? "paid" : (paidAmount > 0 ? "partially_paid" : (req.body?.status || "draft"));
+
     const invoice = new Invoice({
       organization: req.user.organization,
       invoiceNumber,
       customerId: quotation.customerId,
       contactId: quotation.contactId,
       quotationId: quotation._id,
-      status: paidAmount >= quotation.grandTotal && quotation.grandTotal > 0 ? "paid" : req.body?.status || "draft",
+      status,
       issueDate: req.body?.issueDate || new Date(),
       dueDate: req.body?.dueDate || null,
       currency: quotation.currency,
       businessLine: quotation.businessLine,
-      lineItems: quotation.lineItems.map((item) => item.toObject ? item.toObject() : item),
-      subtotal: quotation.subtotal,
-      discountType: quotation.discountType,
-      discountValue: quotation.discountValue,
-      discountAmount: quotation.discountAmount,
-      taxTotal: quotation.taxTotal,
-      grandTotal: quotation.grandTotal,
-      paidAmount,
-      balance,
+      lineItems,
+      subtotal, discountType, discountValue, discountAmount, taxTotal,
+      grandTotal: invGrand,
+      paidAmount: roundMoney(paidAmount), balance,
       paymentMethod: req.body?.paymentMethod || "",
       paymentTerms: req.body?.paymentTerms || "",
       depositAmount: Number(req.body?.depositAmount || 0),
@@ -468,11 +492,15 @@ router.post("/:id/create-invoice", requireRole("owner_admin", "admin"), async (r
       updatedBy: req.user.id,
     });
     if (invoice.status === "paid") invoice.paidAt = new Date();
-    addHistory(invoice, "invoice.created", `Invoice ${invoice.invoiceNumber} created from quotation ${quotation.quotationNumber}`, req);
-    quotation.status = "converted_to_invoice";
-    quotation.convertedToInvoiceId = invoice._id;
+    addHistory(invoice, "invoice.created", `Invoice ${invoice.invoiceNumber} (${quotation.currency} ${invGrand}) created from quotation ${quotation.quotationNumber}`, req);
+
+    const totalInvoicedNow = roundMoney(alreadyInvoiced + invGrand);
+    if (totalInvoicedNow >= roundMoney(quotation.grandTotal)) {
+      quotation.status = "converted_to_invoice";
+      quotation.convertedToInvoiceId = invoice._id;
+    }
     quotation.updatedBy = req.user.id;
-    addHistory(quotation, "quotation.invoice_created", `Invoice ${invoice.invoiceNumber} created`, req);
+    addHistory(quotation, "quotation.invoice_created", `Invoice ${invoice.invoiceNumber} created (${quotation.currency} ${invGrand} of ${quotation.grandTotal})`, req);
     await invoice.save();
     await quotation.save();
     const out = await Invoice.findById(invoice._id)
