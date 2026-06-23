@@ -9,6 +9,7 @@ const CustomerContact = require("../../models/CustomerContact");
 const Customer = require("../../models/Customer");
 const Quotation = require("../../models/Quotation");
 const Invoice = require("../../models/Invoice");
+const Project = require("../../models/Project");
 const { auth, getSecret } = require("../../middleware/auth");
 const { getStripe, createInvoiceCheckoutUrl } = require("../../services/stripe");
 const { applyStripePayment } = require("../../services/invoicePayment");
@@ -275,6 +276,29 @@ router.get("/my-invoices", auth, async (req, res) => {
     return res.json(invoices);
   } catch (err) {
     console.error("my-invoices error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET /api/auth/my-projects -> this customer's projects (read-only portal view)
+router.get("/my-projects", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || user.userType !== "customer" || !user.customerId) {
+      return res.status(403).json({ message: "Not a customer account" });
+    }
+    const projects = await Project.find({
+      organization: user.organization,
+      customerId: user.customerId,
+      isDeleted: false,
+    })
+      .select("-internalNotes -history")
+      .populate("projectLeaderId", "name avatar")
+      .populate("quotationId", "quotationNumber")
+      .sort({ createdAt: -1 });
+    return res.json(projects);
+  } catch (err) {
+    console.error("my-projects error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });
