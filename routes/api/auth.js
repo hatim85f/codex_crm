@@ -8,7 +8,10 @@ const User = require("../../models/User");
 const CustomerContact = require("../../models/CustomerContact");
 const Customer = require("../../models/Customer");
 const Quotation = require("../../models/Quotation");
+const Invoice = require("../../models/Invoice");
 const { auth, getSecret } = require("../../middleware/auth");
+const { createInvoiceCheckoutUrl } = require("../../services/stripe");
+const portalWebBase = () => process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
 const { logActivity } = require("../../services/activityLog");
 const { createNotifications } = require("../../services/notify");
 
@@ -247,6 +250,53 @@ router.patch("/my-quotations/:id/respond", auth, async (req, res) => {
     return res.json(out);
   } catch (err) {
     console.error("respond quotation error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET /api/auth/my-invoices -> invoices shared to this customer's portal
+router.get("/my-invoices", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || user.userType !== "customer" || !user.customerId) {
+      return res.status(403).json({ message: "Not a customer account" });
+    }
+    const invoices = await Invoice.find({
+      organization: user.organization,
+      customerId: user.customerId,
+      sharedToPortal: true,
+    })
+      .populate("customerId", "displayName companyName email phone tax")
+      .populate("contactId", "name email phone")
+      .populate("bankAccountId", "bankName accountHolderName accountNumber iban swift currency isPrimary logo branch")
+      .populate("quotationId", "quotationNumber")
+      .sort({ createdAt: -1 });
+    return res.json(invoices);
+  } catch (err) {
+    console.error("my-invoices error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/auth/my-invoices/:id/pay -> customer creates a Stripe checkout link for their own invoice
+router.post("/my-invoices/:id/pay", auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user || user.userType !== "customer" || !user.customerId) {
+      return res.status(403).json({ message: "Not a customer account" });
+    }
+    const invoice = await Invoice.findById(req.params.id);
+    if (!invoice || String(invoice.organization) !== String(user.organization) || String(invoice.customerId) !== String(user.customerId) || !invoice.sharedToPortal) {
+      return res.status(404).json({ message: "Invoice not found" });
+    }
+    if (!(invoice.balance > 0)) return res.status(400).json({ message: "This invoice is already paid." });
+    const url = await createInvoiceCheckoutUrl(invoice, portalWebBase());
+    if (!url) return res.status(503).json({ message: "Online payment is not available right now." });
+    invoice.paymentLink = url;
+    await invoice.save();
+    return res.json({ url });
+  } catch (err) {
+    console.error("my-invoice pay error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });

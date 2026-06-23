@@ -8,6 +8,7 @@ const TEMPLATES = {
   TEAM_INVITATION: 4, // params: userName, manager, userEmail, password
   CUSTOMER_ACTIVATION: 7, // params: contactName, customerName, activationLink, portalWebLink, iosAppLink, androidAppLink
   QUOTATION_PORTAL: 9, // params: firstName, lastName, assignedPerso, assigneePhone, fileLink
+  INVOICE_PORTAL: 10, // params: firstName, lastName, invoiceNumber, paymentLink
 };
 
 async function sendBrevoEmail({ templateId, to, params }) {
@@ -77,6 +78,20 @@ function sendQuotationPortal({ email, firstName, lastName, assignedPerso, assign
   });
 }
 
+// Invoice available on portal — Brevo template #10
+function sendInvoicePortal({ email, firstName, lastName, invoiceNumber, paymentLink }) {
+  return sendBrevoEmail({
+    templateId: TEMPLATES.INVOICE_PORTAL,
+    to: { email, name: `${firstName || ""} ${lastName || ""}`.trim() || email },
+    params: {
+      firstName: firstName || "",
+      lastName: lastName || "",
+      invoiceNumber: invoiceNumber || "",
+      paymentLink: paymentLink || "",
+    },
+  });
+}
+
 // Forgot password (OTP) — Brevo template #3
 function sendForgotPassword({ email, userName, otp }) {
   return sendBrevoEmail({
@@ -93,4 +108,5 @@ module.exports = {
   sendTeamInvitation,
   sendForgotPassword,
   sendQuotationPortal,
+  sendInvoicePortal,
 };

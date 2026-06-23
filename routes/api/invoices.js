@@ -12,7 +12,8 @@ const BankAccount = require("../../models/BankAccount");
 const { auth, requireRole } = require("../../middleware/auth");
 const { calculateDocument, roundMoney } = require("../../utils/documentTotals");
 const { createNotifications } = require("../../services/notify");
-const { getStripe } = require("../../services/stripe");
+const { getStripe, createInvoiceCheckoutUrl } = require("../../services/stripe");
+const { sendInvoicePortal } = require("../../services/emailService");
 const webBase = () => process.env.WEB_BASE_URL || "https://codex-crm-24a42f641a41.herokuapp.com";
 const { nextDocumentNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
@@ -378,35 +379,82 @@ router.patch("/:id/record-payment", requireRole(...MANAGE), async (req, res) => 
 // POST /api/invoices/:id/payment-link — create a Stripe Checkout link for the balance.
 router.post("/:id/payment-link", requireRole(...MANAGE), async (req, res) => {
   try {
-    const stripe = getStripe();
-    if (!stripe) return res.status(503).json({ message: "Stripe is not configured. Set STRIPE_SECRET_KEY on the server." });
+    if (!getStripe()) return res.status(503).json({ message: "Stripe is not configured. Set STRIPE_SECRET_KEY on the server." });
     const invoice = await loadInvoice(req, res);
     if (!invoice) return;
-    const amountDue = roundMoney(invoice.balance > 0 ? invoice.balance : invoice.grandTotal);
-    if (amountDue <= 0) return res.status(400).json({ message: "This invoice has nothing left to pay." });
-    const base = webBase();
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [{
-        price_data: {
-          currency: String(invoice.currency || "AED").toLowerCase(),
-          product_data: { name: `Invoice ${invoice.invoiceNumber}` },
-          unit_amount: Math.round(amountDue * 100),
-        },
-        quantity: 1,
-      }],
-      metadata: { invoiceId: String(invoice._id), invoiceNumber: invoice.invoiceNumber },
-      success_url: `${base}/portal/invoices?paid=${invoice._id}`,
-      cancel_url: `${base}/portal/invoices`,
-    });
-    invoice.paymentLink = session.url;
+    const url = await createInvoiceCheckoutUrl(invoice, webBase());
+    if (!url) return res.status(400).json({ message: "This invoice has nothing left to pay." });
+    invoice.paymentLink = url;
     invoice.updatedBy = req.user.id;
     addHistory(invoice, "invoice.payment_link", "Payment link generated", req);
     await invoice.save();
-    return res.json({ url: session.url });
+    return res.json({ url });
   } catch (err) {
     console.error("payment link error:", err.message);
     return res.status(500).json({ message: err.message || "Could not create payment link" });
+  }
+});
+
+// POST /api/invoices/:id/send  { portal, email }
+// portal -> visible in the customer portal with a Pay Now button; email -> Brevo #10 with a payment link.
+router.post("/:id/send", requireRole(...MANAGE), async (req, res) => {
+  try {
+    let { portal, email } = req.body || {};
+    if (portal === undefined && email === undefined) { portal = true; email = true; }
+    portal = !!portal; email = !!email;
+    if (!portal && !email) return res.status(400).json({ message: "Choose portal, email, or both" });
+
+    const invoice = await loadInvoice(req, res);
+    if (!invoice) return;
+    if (portal) { invoice.sharedToPortal = true; invoice.sharedToPortalAt = new Date(); }
+    if (email) invoice.emailSentAt = new Date();
+    if (invoice.status === "draft") { invoice.status = "sent"; if (!invoice.sentAt) invoice.sentAt = new Date(); }
+
+    // Ensure we have a payment link (for the email + portal Pay Now).
+    let paymentLink = invoice.paymentLink;
+    if (!paymentLink && invoice.balance > 0) {
+      try { paymentLink = await createInvoiceCheckoutUrl(invoice, webBase()); if (paymentLink) invoice.paymentLink = paymentLink; } catch (e) { /* non-fatal */ }
+    }
+    invoice.updatedBy = req.user.id;
+    addHistory(invoice, "invoice.sent", `Invoice sent (${[portal && "portal", email && "email"].filter(Boolean).join(" + ")})`, req);
+    await invoice.save();
+
+    await notifyCustomerPortalUsers({
+      organization: req.user.organization,
+      customerId: invoice.customerId,
+      type: "invoice.sent",
+      title: "Invoice available",
+      message: `Invoice ${invoice.invoiceNumber} is available to pay`,
+      link: `invoices/${invoice._id}`,
+      meta: { invoiceId: invoice._id, invoiceNumber: invoice.invoiceNumber },
+    });
+
+    let emailError = null;
+    if (email) {
+      const populated = await populateInvoice(Invoice.findById(invoice._id));
+      const contact = populated.contactId;
+      const customer = populated.customerId;
+      const recipient = contact?.email || customer?.email;
+      if (!recipient) emailError = "No email address found for this customer or contact.";
+      else {
+        const parts = String(contact?.name || customer?.displayName || "").trim().split(/\s+/);
+        try {
+          await sendInvoicePortal({
+            email: recipient,
+            firstName: parts[0] || "",
+            lastName: parts.slice(1).join(" "),
+            invoiceNumber: invoice.invoiceNumber,
+            paymentLink: paymentLink || `${webBase()}/portal/invoices`,
+          });
+        } catch (e) { emailError = e.message || "Failed to send email"; }
+      }
+    }
+
+    const out = await populateInvoice(Invoice.findById(invoice._id));
+    return res.json({ invoice: out, emailError });
+  } catch (err) {
+    console.error("send invoice error:", err.message);
+    return res.status(500).json({ message: "Server error" });
   }
 });
 

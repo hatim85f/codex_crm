@@ -68,6 +68,8 @@ const InvoiceSchema = new Schema(
     internalNotes: { type: String, default: "" },
     pdfUrl: { type: String, default: "" },
     emailSentAt: { type: Date, default: null },
+    sharedToPortal: { type: Boolean, default: false },
+    sharedToPortalAt: { type: Date, default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     sentAt: { type: Date, default: null },
