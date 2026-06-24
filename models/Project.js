@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const { Schema } = mongoose;
 
-const PROJECT_STATUSES = ["not_started", "in_progress", "waiting_customer", "under_review", "completed", "cancelled", "on_hold"];
+const PROJECT_STATUSES = ["not_started", "in_progress", "waiting_customer", "under_review", "delivered", "completed", "cancelled", "on_hold"];
 
 // Services are COPIED from the quotation so the project keeps its own snapshot.
 const ProjectServiceSchema = new Schema(
