@@ -10,8 +10,6 @@ const Customer = require("../../models/Customer");
 const Quotation = require("../../models/Quotation");
 const Invoice = require("../../models/Invoice");
 const Project = require("../../models/Project");
-const ProjectStep = require("../../models/ProjectStep");
-const { recalcProjectProgress } = require("../../services/projectProgress");
 const { auth, getSecret } = require("../../middleware/auth");
 const { getStripe, createInvoiceCheckoutUrl } = require("../../services/stripe");
 const { applyStripePayment } = require("../../services/invoicePayment");
@@ -301,87 +299,6 @@ router.get("/my-projects", auth, async (req, res) => {
     return res.json(projects);
   } catch (err) {
     console.error("my-projects error:", err.message);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-// GET /api/auth/my-approvals -> step approvals shared to this customer for review
-router.get("/my-approvals", auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
-    if (!user || user.userType !== "customer" || !user.customerId) {
-      return res.status(403).json({ message: "Not a customer account" });
-    }
-    const projects = await Project.find({ organization: user.organization, customerId: user.customerId, isDeleted: false }).select("_id projectName");
-    const projectMap = Object.fromEntries(projects.map((p) => [String(p._id), p.projectName]));
-    const steps = await ProjectStep.find({
-      organization: user.organization,
-      projectId: { $in: projects.map((p) => p._id) },
-      isDeleted: false,
-      requiresCustomerApproval: true,
-      "approval.sentAt": { $ne: null },
-    }).sort({ "approval.sentAt": -1 });
-    const out = steps.map((s) => ({
-      _id: s._id,
-      stepTitle: s.stepTitle,
-      projectId: s.projectId,
-      projectName: projectMap[String(s.projectId)] || "Project",
-      customerApprovalStatus: s.customerApprovalStatus,
-      progress: s.progress,
-      approval: s.approval,
-    }));
-    return res.json(out);
-  } catch (err) {
-    console.error("my-approvals error:", err.message);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
-
-// PATCH /api/auth/my-approvals/:stepId/respond  { decision: approve|reject, note }
-router.patch("/my-approvals/:stepId/respond", auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
-    if (!user || user.userType !== "customer" || !user.customerId) {
-      return res.status(403).json({ message: "Not a customer account" });
-    }
-    const { decision, note } = req.body || {};
-    if (!["approve", "reject"].includes(decision)) return res.status(400).json({ message: "decision must be approve or reject" });
-
-    const step = await ProjectStep.findOne({ _id: req.params.stepId, organization: user.organization, isDeleted: false });
-    if (!step || !step.requiresCustomerApproval || !step.approval?.sentAt) {
-      return res.status(404).json({ message: "Approval request not found" });
-    }
-    const project = await Project.findOne({ _id: step.projectId, organization: user.organization, customerId: user.customerId, isDeleted: false });
-    if (!project) return res.status(404).json({ message: "Approval request not found" });
-    if (step.customerApprovalStatus !== "pending") {
-      return res.status(400).json({ message: "This item has already been reviewed." });
-    }
-
-    step.approval.respondedAt = new Date();
-    step.approval.responderName = user.name;
-    step.approval.customerNote = note || "";
-    if (decision === "approve") {
-      step.customerApprovalStatus = "approved";
-      step.status = "approved";
-      step.progress = 100;
-    } else {
-      step.customerApprovalStatus = "rejected";
-      if (step.status === "approved" || step.status === "completed") step.status = "in_progress";
-    }
-    await step.save();
-    await recalcProjectProgress(project._id);
-
-    logActivity({
-      organization: user.organization,
-      customerId: user.customerId,
-      type: decision === "approve" ? "project.step.approved" : "project.step.rejected",
-      message: `${user.name} ${decision === "approve" ? "approved" : "requested changes on"} "${step.stepTitle}"`,
-      actorId: user._id,
-      actorName: user.name,
-    });
-    return res.json({ ok: true, _id: step._id, customerApprovalStatus: step.customerApprovalStatus });
-  } catch (err) {
-    console.error("respond approval error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });

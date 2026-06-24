@@ -30,6 +30,8 @@ app.use("/api/quotations", require("./routes/api/quotations"));
 app.use("/api/invoices", require("./routes/api/invoices"));
 app.use("/api/projects", require("./routes/api/projects"));
 app.use("/api", require("./routes/api/projectSteps"));
+app.use("/api", require("./routes/api/projectApprovals"));
+app.use("/api/customer-portal", require("./routes/api/customerPortalApprovals"));
 app.use("/api/notifications", require("./routes/api/notifications"));
 
 const PORT = process.env.PORT || 5000;

@@ -5,31 +5,6 @@ const { Schema } = mongoose;
 const STEP_STATUSES = ["pending", "in_progress", "submitted", "approved", "rejected", "completed"];
 const CUSTOMER_APPROVAL_STATUSES = ["not_required", "pending", "approved", "rejected"];
 
-// Files/links prepared for the customer to review before they approve a step.
-const ApprovalAttachmentSchema = new Schema(
-  { name: { type: String, default: "" }, url: { type: String, required: true }, type: { type: String, default: "" }, bytes: { type: Number, default: 0 } },
-  { _id: false }
-);
-const ApprovalLinkSchema = new Schema(
-  { label: { type: String, default: "" }, url: { type: String, required: true } },
-  { _id: false }
-);
-const ApprovalSchema = new Schema(
-  {
-    title: { type: String, default: "" },
-    message: { type: String, default: "" },
-    attachments: { type: [ApprovalAttachmentSchema], default: [] },
-    links: { type: [ApprovalLinkSchema], default: [] },
-    preparedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
-    preparedAt: { type: Date, default: null },
-    sentAt: { type: Date, default: null }, // when shared to the customer portal
-    respondedAt: { type: Date, default: null },
-    responderName: { type: String, default: "" }, // customer contact who responded
-    customerNote: { type: String, default: "" },
-  },
-  { _id: false }
-);
-
 const ProjectStepSchema = new Schema(
   {
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
@@ -45,10 +20,10 @@ const ProjectStepSchema = new Schema(
     dueDate: { type: Date, default: null },
     order: { type: Number, default: 0 },
 
-    // Customer approval workflow.
+    // Customer approval workflow — full request lives in the ProjectApproval collection.
     requiresCustomerApproval: { type: Boolean, default: false },
     customerApprovalStatus: { type: String, enum: CUSTOMER_APPROVAL_STATUSES, default: "not_required" },
-    approval: { type: ApprovalSchema, default: () => ({}) },
+    activeApprovalId: { type: Schema.Types.ObjectId, ref: "ProjectApproval", default: null },
 
     submittedAt: { type: Date, default: null },
     submittedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },

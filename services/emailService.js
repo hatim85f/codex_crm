@@ -9,6 +9,7 @@ const TEMPLATES = {
   CUSTOMER_ACTIVATION: 7, // params: contactName, customerName, activationLink, portalWebLink, iosAppLink, androidAppLink
   QUOTATION_PORTAL: 9, // params: firstName, lastName, assignedPerso, assigneePhone, fileLink
   INVOICE_PORTAL: 10, // params: firstName, lastName, invoiceNumber, paymentLink
+  PROJECT_APPROVAL: 11, // params: firstName, lastName, customerName, projectName, stepName, approvalTitle, approvalMessage, approvalLink, dueDate, teamLeader, companyName
 };
 
 async function sendBrevoEmail({ templateId, to, params }) {
@@ -95,6 +96,30 @@ function sendInvoicePortal({ email, recipients, firstName, lastName, invoiceNumb
   });
 }
 
+// Project step requires customer approval — Brevo template #11
+function sendProjectApprovalRequest({ email, recipients, firstName, lastName, customerName, projectName, stepName, approvalTitle, approvalMessage, approvalLink, dueDate, teamLeader, companyName }) {
+  const to = Array.isArray(recipients) && recipients.length
+    ? recipients
+    : { email, name: `${firstName || ""} ${lastName || ""}`.trim() || email };
+  return sendBrevoEmail({
+    templateId: TEMPLATES.PROJECT_APPROVAL,
+    to,
+    params: {
+      firstName: firstName || "",
+      lastName: lastName || "",
+      customerName: customerName || "",
+      projectName: projectName || "",
+      stepName: stepName || "",
+      approvalTitle: approvalTitle || "",
+      approvalMessage: approvalMessage || "",
+      approvalLink: approvalLink || "",
+      dueDate: dueDate || "—",
+      teamLeader: teamLeader || "our team",
+      companyName: companyName || "Codex",
+    },
+  });
+}
+
 // Forgot password (OTP) — Brevo template #3
 function sendForgotPassword({ email, userName, otp }) {
   return sendBrevoEmail({
@@ -112,4 +137,5 @@ module.exports = {
   sendForgotPassword,
   sendQuotationPortal,
   sendInvoicePortal,
+  sendProjectApprovalRequest,
 };
