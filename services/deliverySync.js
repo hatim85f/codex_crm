@@ -7,10 +7,15 @@ async function syncProjectFromDelivery(delivery, action, actor) {
   if (!project) return null;
 
   if (action === "approve") {
-    project.status = "completed";
-    project.progress = 100;
-    project.completedAt = new Date();
-    project.history.push({ action: "delivery.approved", message: "Customer approved final delivery", userId: actor || null, at: new Date() });
+    if (project.isOngoing) {
+      // Ongoing projects are never closed by a delivery — treat it as an optional report/delivery approval.
+      project.history.push({ action: "delivery.approved", message: "Customer approved a delivery (ongoing project — remains active)", userId: actor || null, at: new Date() });
+    } else {
+      project.status = "completed";
+      project.progress = 100;
+      project.completedAt = new Date();
+      project.history.push({ action: "delivery.approved", message: "Customer approved final delivery", userId: actor || null, at: new Date() });
+    }
   } else if (action === "changes") {
     // Reopen for the team to act on the requested changes.
     project.status = "waiting_customer";

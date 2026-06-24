@@ -44,6 +44,7 @@ const ProjectSchema = new Schema(
     // Steps (Phase 2): when a project has steps, progress is computed from weighted steps.
     hasSteps: { type: Boolean, default: false },
     progressCalculationMode: { type: String, enum: ["manual", "steps"], default: "steps" },
+    progressContext: { type: String, enum: ["project", "cycle"], default: "project" }, // "cycle" for ongoing projects
     completedAt: { type: Date, default: null }, // set when customer approves final delivery
     notes: { type: String, default: "" },
     internalNotes: { type: String, default: "" },

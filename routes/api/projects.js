@@ -74,6 +74,7 @@ async function buildPayload(req, body, existing) {
     startDate: body.startDate || null,
     endDate: body.isOngoing ? null : (body.endDate || null),
     isOngoing: !!body.isOngoing,
+    progressContext: body.isOngoing ? "cycle" : "project",
     status: STATUSES.includes(body.status) ? body.status : "not_started",
     projectLeaderId: body.projectLeaderId || null,
     assignedMembers: Array.isArray(body.assignedMembers) ? body.assignedMembers.filter((id) => mongoose.Types.ObjectId.isValid(id)) : [],
@@ -161,6 +162,7 @@ router.post("/from-quotation/:quotationId", requireRole(...CREATE), async (req, 
       startDate: b.startDate || new Date(),
       endDate: b.isOngoing ? null : (b.endDate || null),
       isOngoing: !!b.isOngoing,
+      progressContext: b.isOngoing ? "cycle" : "project",
       projectLeaderId: b.projectLeaderId || null,
       assignedMembers: Array.isArray(b.assignedMembers) ? b.assignedMembers.filter((id) => mongoose.Types.ObjectId.isValid(id)) : [],
       progress: Math.max(0, Math.min(100, Number(b.progress) || 0)),
@@ -248,7 +250,8 @@ router.patch("/:id/progress", async (req, res) => {
     if (!project) return;
     if (!(await canManageProject(req, project))) return res.status(403).json({ message: "Not allowed" });
     project.progress = progress;
-    if (progress >= 100 && project.status !== "completed" && project.status !== "cancelled") project.status = "completed";
+    // Ongoing projects never auto-complete — 100% means the current cycle is done, not the project.
+    if (!project.isOngoing && progress >= 100 && project.status !== "completed" && project.status !== "cancelled") project.status = "completed";
     project.updatedBy = req.user.id;
     addHistory(project, "project.progress", `Progress set to ${progress}%`, req);
     await project.save();
