@@ -1,0 +1,108 @@
+<!--
+  Brevo Transactional Template #12
+  Name:    Codex CRM - Project Final Delivery Request
+  Subject: Your project delivery is ready: {{params.deliveryTitle}}
+  Preview: {{params.firstName}}, your final delivery for {{params.projectName}} is ready to review.
+
+  Params: firstName, lastName, customerName, projectName, deliveryTitle,
+          deliveryMessage, deliveryLink, dueDate, teamLeader, companyName
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Final delivery ready</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4F6F9;font-family:'Hanken Grotesk',Arial,Helvetica,sans-serif;color:#131E3D;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4F6F9;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;background:#FFFFFF;border-radius:14px;overflow:hidden;box-shadow:0 4px 18px rgba(19,30,61,0.06);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:#0D6666;padding:26px 32px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="color:#FFFFFF;font-size:18px;font-weight:800;letter-spacing:0.3px;">{{params.companyName}}</td>
+                  <td align="right" style="color:#CDAD7D;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Final Delivery</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Gold accent bar -->
+          <tr><td style="height:4px;background:#CDAD7D;line-height:4px;font-size:4px;">&nbsp;</td></tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+              <p style="margin:0 0 16px;font-size:16px;font-weight:700;">Hello {{params.firstName}} {{params.lastName}},</p>
+              <p style="margin:0 0 22px;font-size:14px;line-height:22px;color:#3A4A5C;">
+                Great news — your project is ready for handover. Please review the final delivery and approve it, or request any changes.
+              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F7F9FC;border:1px solid #E6EAF1;border-radius:10px;margin-bottom:22px;">
+                <tr><td style="padding:16px 18px;">
+                  <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:#647488;font-weight:700;">Project</p>
+                  <p style="margin:0 0 14px;font-size:14px;font-weight:600;">{{params.projectName}}</p>
+
+                  <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:#647488;font-weight:700;">Delivery</p>
+                  <p style="margin:0;font-size:14px;font-weight:600;">{{params.deliveryTitle}}</p>
+                </td></tr>
+              </table>
+
+              <p style="margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:#647488;font-weight:700;">Message from our team</p>
+              <p style="margin:0 0 24px;font-size:14px;line-height:22px;color:#3A4A5C;">{{params.deliveryMessage}}</p>
+
+              <p style="margin:0 0 18px;font-size:14px;line-height:22px;color:#3A4A5C;">
+                Click below to review the delivered files, links, and handover checklist, then approve the delivery or request changes.
+              </p>
+
+              <!-- CTA -->
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 22px;">
+                <tr>
+                  <td align="center" style="background:#0D6666;border-radius:10px;">
+                    <a href="{{params.deliveryLink}}" target="_blank"
+                       style="display:inline-block;padding:14px 30px;font-size:15px;font-weight:700;color:#FFFFFF;text-decoration:none;">
+                      Review &amp; Approve Delivery
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 22px;font-size:13px;color:#647488;text-align:center;">
+                Due date: <strong style="color:#131E3D;">{{params.dueDate}}</strong>
+              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFF8E6;border:1px solid #F0E2BC;border-radius:10px;margin-bottom:22px;">
+                <tr><td style="padding:14px 16px;font-size:13px;line-height:20px;color:#7A5C12;">
+                  Once you approve the final delivery, your project will be marked complete. If anything needs adjusting, choose
+                  <strong>“Request Changes”</strong> and add your comments so our team can finalize the work.
+                </td></tr>
+              </table>
+
+              <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:#647488;font-weight:700;">Your project lead</p>
+              <p style="margin:0 0 22px;font-size:14px;font-weight:600;">{{params.teamLeader}}</p>
+
+              <p style="margin:0;font-size:14px;color:#3A4A5C;">Thank you,<br/><strong>{{params.companyName}}</strong></p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#131E3D;padding:18px 32px;">
+              <p style="margin:0;font-size:11px;color:#7C86AB;text-align:center;">
+                This message was sent to {{params.customerName}} by {{params.companyName}}. If the button doesn't work, copy this link:<br/>
+                <a href="{{params.deliveryLink}}" style="color:#CDAD7D;word-break:break-all;">{{params.deliveryLink}}</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
