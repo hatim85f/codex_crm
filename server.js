@@ -29,9 +29,11 @@ app.use("/api/quotation-terms", require("./routes/api/quotationTerms"));
 app.use("/api/quotations", require("./routes/api/quotations"));
 app.use("/api/invoices", require("./routes/api/invoices"));
 app.use("/api/projects", require("./routes/api/projects"));
+// Customer-portal routes must be mounted BEFORE the broad "/api" internal routers below,
+// otherwise their router-level requireRole(INTERNAL) guard rejects customer requests.
+app.use("/api/customer-portal", require("./routes/api/customerPortalApprovals"));
 app.use("/api", require("./routes/api/projectSteps"));
 app.use("/api", require("./routes/api/projectApprovals"));
-app.use("/api/customer-portal", require("./routes/api/customerPortalApprovals"));
 app.use("/api/notifications", require("./routes/api/notifications"));
 
 const PORT = process.env.PORT || 5000;
