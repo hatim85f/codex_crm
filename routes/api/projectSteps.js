@@ -323,6 +323,46 @@ router.patch("/project-steps/:id/review", async (req, res) => {
   }
 });
 
+// PUT /api/project-steps/:id/approval  -> prepare (and optionally send) a customer approval
+// body: { title, message, attachments[], links[], send }
+router.put("/project-steps/:id/approval", async (req, res) => {
+  try {
+    const { step, project } = await loadStep(req, res);
+    if (!step) return;
+    if (!canManageSteps(req, project)) return res.status(403).json({ message: "Only the project leader or an admin can prepare customer approvals." });
+    const b = req.body || {};
+    const attachments = Array.isArray(b.attachments) ? b.attachments.filter((a) => a && a.url).map((a) => ({ name: a.name || "", url: a.url, type: a.type || "", bytes: Number(a.bytes) || 0 })) : [];
+    const links = Array.isArray(b.links) ? b.links.filter((l) => l && l.url).map((l) => ({ label: l.label || "", url: l.url })) : [];
+
+    step.requiresCustomerApproval = true;
+    step.approval = {
+      ...(step.approval ? step.approval.toObject?.() || step.approval : {}),
+      title: b.title || step.approval?.title || "",
+      message: b.message || "",
+      attachments,
+      links,
+      preparedBy: req.user.id,
+      preparedAt: new Date(),
+    };
+    if (b.send) {
+      step.approval.sentAt = new Date();
+      step.approval.respondedAt = null;
+      step.approval.responderName = "";
+      step.approval.customerNote = "";
+      step.customerApprovalStatus = "pending";
+    } else if (step.customerApprovalStatus === "not_required") {
+      step.customerApprovalStatus = "pending";
+    }
+    step.updatedBy = req.user.id;
+    await step.save();
+    const out = await populateStep(ProjectStep.findById(step._id));
+    return res.json(out);
+  } catch (err) {
+    console.error("prepare approval error:", err.message);
+    return res.status(400).json({ message: err.message || "Could not prepare approval" });
+  }
+});
+
 // DELETE /api/project-steps/:id (soft delete — managers only)
 router.delete("/project-steps/:id", async (req, res) => {
   try {
