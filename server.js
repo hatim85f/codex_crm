@@ -32,8 +32,12 @@ app.use("/api/projects", require("./routes/api/projects"));
 // Customer-portal routes must be mounted BEFORE the broad "/api" internal routers below,
 // otherwise their router-level requireRole(INTERNAL) guard rejects customer requests.
 app.use("/api/customer-portal", require("./routes/api/customerPortalApprovals"));
+app.use("/api/customer-portal", require("./routes/api/customerPortalDeliveries"));
+app.use("/api/customer-portal", require("./routes/api/customerPortalComments"));
 app.use("/api", require("./routes/api/projectSteps"));
 app.use("/api", require("./routes/api/projectApprovals"));
+app.use("/api", require("./routes/api/projectDeliveries"));
+app.use("/api", require("./routes/api/projectComments"));
 app.use("/api/notifications", require("./routes/api/notifications"));
 
 const PORT = process.env.PORT || 5000;

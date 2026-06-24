@@ -293,7 +293,7 @@ router.get("/my-projects", auth, async (req, res) => {
       isDeleted: false,
     })
       .select("-internalNotes -history")
-      .populate("projectLeaderId", "name avatar")
+      .populate("projectLeaderId", "name avatar phone whatsapp jobTitle")
       .populate("quotationId", "quotationNumber")
       .sort({ createdAt: -1 });
     return res.json(projects);

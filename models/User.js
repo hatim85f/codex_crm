@@ -23,6 +23,7 @@ const UserSchema = new Schema(
       trim: true,
     },
     phone: { type: String, default: "" },
+    whatsapp: { type: String, default: "" },
     // Not required: invited customers set their password later via activation.
     passwordHash: { type: String, select: false },
     role: { type: String, enum: ROLES, required: true },
