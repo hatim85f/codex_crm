@@ -1,0 +1,94 @@
+<!--
+  Brevo Transactional Template #10
+  Name:    Codex CRM - Invoice Ready
+  Subject: Your invoice {{params.invoiceNumber}} is ready
+  Preview: {{params.firstName}}, your invoice {{params.invoiceNumber}} is ready to pay.
+
+  Params: firstName, lastName, invoiceNumber, paymentLink
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Invoice ready</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F4F6F9;font-family:'Hanken Grotesk',Arial,Helvetica,sans-serif;color:#131E3D;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F4F6F9;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;background:#FFFFFF;border-radius:14px;overflow:hidden;box-shadow:0 4px 18px rgba(19,30,61,0.06);">
+
+          <!-- Header with logo -->
+          <tr>
+            <td style="background:#0D6666;padding:22px 32px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="left" valign="middle">
+                    <img src="https://res.cloudinary.com/dt3u7d1tv/image/upload/v1782058297/codex-pdf-logo.png" alt="Codex FZE" height="44" style="height:44px;width:auto;display:block;border:0;outline:none;" />
+                  </td>
+                  <td align="right" valign="middle" style="color:#CDAD7D;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Invoice</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Gold accent bar -->
+          <tr><td style="height:4px;background:#CDAD7D;line-height:4px;font-size:4px;">&nbsp;</td></tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+              <p style="margin:0 0 16px;font-size:16px;font-weight:700;">Dear {{params.firstName}} {{params.lastName}},</p>
+              <p style="margin:0 0 22px;font-size:14px;line-height:22px;color:#3A4A5C;">
+                Your invoice is ready. You can review it and pay securely online using the button below.
+              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F7F9FC;border:1px solid #E6EAF1;border-radius:10px;margin-bottom:22px;">
+                <tr><td style="padding:16px 18px;">
+                  <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:#647488;font-weight:700;">Invoice number</p>
+                  <p style="margin:0;font-size:16px;font-weight:800;color:#0D6666;">{{params.invoiceNumber}}</p>
+                </td></tr>
+              </table>
+
+              <!-- CTA -->
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
+                <tr>
+                  <td align="center" style="background:#0D6666;border-radius:10px;">
+                    <a href="{{params.paymentLink}}" target="_blank"
+                       style="display:inline-block;padding:14px 34px;font-size:15px;font-weight:700;color:#FFFFFF;text-decoration:none;">
+                      Make Payment
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFF8E6;border:1px solid #F0E2BC;border-radius:10px;margin-bottom:22px;">
+                <tr><td style="padding:14px 16px;font-size:13px;line-height:20px;color:#7A5C12;">
+                  Thank you for choosing Codex FZE. For any queries or requests, email us at
+                  <a href="mailto:finance@codex-fze.com" style="color:#9A6A12;font-weight:700;">finance@codex-fze.com</a>.
+                </td></tr>
+              </table>
+
+              <p style="margin:0;font-size:14px;color:#3A4A5C;">Regards,<br/><strong>Codex FZE</strong> &mdash; Finance Team</p>
+            </td>
+          </tr>
+
+          <!-- Footer with small logo -->
+          <tr>
+            <td style="background:#131E3D;padding:22px 32px;" align="center">
+              <img src="https://res.cloudinary.com/dt3u7d1tv/image/upload/v1782058297/codex-pdf-logo.png" alt="Codex FZE" height="26" style="height:26px;width:auto;display:inline-block;border:0;outline:none;" />
+              <p style="margin:12px 0 0;font-size:11px;color:#7C86AB;text-align:center;line-height:17px;">
+                This is an automated message from Codex FZE.<br/>
+                If the button doesn't work, copy this link:<br/>
+                <a href="{{params.paymentLink}}" style="color:#CDAD7D;word-break:break-all;">{{params.paymentLink}}</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
