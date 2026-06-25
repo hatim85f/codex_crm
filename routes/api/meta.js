@@ -9,6 +9,7 @@ const WhatsAppMessage = require("../../models/WhatsAppMessage");
 const PotentialCustomer = require("../../models/PotentialCustomer");
 const Organization = require("../../models/Organization");
 const User = require("../../models/User");
+const { fetchAndStoreMedia } = require("../../services/whatsappMedia");
 
 // This router is mounted BEFORE express.json() in server.js so we get the raw
 // request body — Meta signs the raw bytes (X-Hub-Signature-256), same as Stripe.
@@ -102,6 +103,9 @@ async function processWhatsAppValue(organization, value) {
 
     const type = ["text", "image", "document", "audio", "video"].includes(m.type) ? m.type : "unknown";
     const text = m.text?.body || m[type]?.caption || "";
+    // Re-host any media (voice note / image / file) so it's actually playable.
+    const mediaId = m[type]?.id || "";
+    const mediaUrl = mediaId ? await fetchAndStoreMedia(mediaId) : "";
     await WhatsAppMessage.create({
       organization,
       conversationId: conv._id,
@@ -110,13 +114,14 @@ async function processWhatsAppValue(organization, value) {
       senderType: "customer",
       messageType: type,
       messageText: text,
-      mediaUrl: m[type]?.id ? `whatsapp-media:${m[type].id}` : "",
+      mediaUrl,
       rawPayload: m,
       status: "received",
     });
 
+    const PREVIEW = { audio: "🎤 Voice message", image: "📷 Photo", document: "📎 Document", video: "🎬 Video" };
     conv.lastMessageAt = new Date();
-    conv.lastMessagePreview = (text || `[${type}]`).slice(0, 120);
+    conv.lastMessagePreview = (text || PREVIEW[type] || `[${type}]`).slice(0, 120);
     conv.unreadCount = (conv.unreadCount || 0) + 1;
     if (conv.status === "resolved" || conv.status === "archived") conv.status = "open";
     await conv.save();

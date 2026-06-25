@@ -48,6 +48,8 @@ app.use("/api/notifications", require("./routes/api/notifications"));
 app.use("/api/potential-customers", require("./routes/api/potentialCustomers"));
 app.use("/api/whatsapp", require("./routes/api/whatsapp"));
 app.use("/api/meta-leads", require("./routes/api/metaLeads"));
+// Task Center / Follow-up Center (internal-only)
+app.use("/api/tasks", require("./routes/api/tasks"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

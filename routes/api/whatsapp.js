@@ -7,7 +7,7 @@ const PotentialCustomer = require("../../models/PotentialCustomer");
 const { auth, requireRole } = require("../../middleware/auth");
 const { canSeeAllLeads, assignedScope } = require("../../services/leadsScope");
 const { WA_CONV_STATUSES } = require("../../models/WhatsAppConversation");
-const { sendWhatsAppText } = require("../../services/whatsappSend");
+const { sendWhatsAppText, sendWhatsAppMedia } = require("../../services/whatsappSend");
 
 const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const MANAGE = ["owner_admin", "admin", "team_leader"];
@@ -90,11 +90,17 @@ router.post("/conversations/:id/messages", async (req, res) => {
   try {
     const conv = await loadConv(req, res);
     if (!conv) return;
-    const text = String(req.body?.messageText || req.body?.message || "").trim();
-    if (!text) return res.status(400).json({ message: "Message is required" });
+    const b = req.body || {};
+    const text = String(b.messageText || b.message || "").trim();
+    const mediaType = ["audio", "image", "document", "video"].includes(b.messageType) ? b.messageType : null;
+    const mediaUrl = b.mediaUrl ? String(b.mediaUrl) : "";
+    if (!mediaType && !text) return res.status(400).json({ message: "Message is required" });
+    if (mediaType && !mediaUrl) return res.status(400).json({ message: "mediaUrl is required" });
 
     // Try to deliver through the WhatsApp Cloud API; record the real outcome.
-    const result = await sendWhatsAppText(conv.phoneNumber, text);
+    const result = mediaType
+      ? await sendWhatsAppMedia(conv.phoneNumber, mediaType, mediaUrl, text)
+      : await sendWhatsAppText(conv.phoneNumber, text);
     const status = result.ok ? "sent" : result.skipped ? "queued" : "failed";
 
     const msg = await WhatsAppMessage.create({
@@ -103,13 +109,15 @@ router.post("/conversations/:id/messages", async (req, res) => {
       metaMessageId: result.messageId || "",
       phoneNumber: conv.phoneNumber,
       senderType: "internal",
-      messageType: "text",
+      messageType: mediaType || "text",
       messageText: text,
+      mediaUrl,
       status,
       sentBy: req.user.id,
     });
+    const PREVIEW = { audio: "🎤 Voice message", image: "📷 Photo", document: "📎 Document", video: "🎬 Video" };
     conv.lastMessageAt = new Date();
-    conv.lastMessagePreview = text.slice(0, 120);
+    conv.lastMessagePreview = (text || PREVIEW[mediaType] || "").slice(0, 120);
     if (!conv.assignedTo) conv.assignedTo = req.user.id;
     if (conv.status === "open") conv.status = "pending";
     await conv.save();
