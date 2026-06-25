@@ -7,8 +7,8 @@ const router = express.Router();
 // request body — Meta signs the raw bytes (X-Hub-Signature-256), same as Stripe.
 router.use(express.raw({ type: "*/*" }));
 
-const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || "";
-const APP_SECRET = process.env.META_APP_SECRET || "";
+const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN || "";
+const APP_SECRET = process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET || "";
 
 // GET /api/meta/webhook -> verification handshake (Meta calls this once when you
 // save the callback URL). Echo hub.challenge only if the verify token matches.
