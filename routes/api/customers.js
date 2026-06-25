@@ -217,6 +217,52 @@ router.get("/:id/activities", async (req, res) => {
   }
 });
 
+// GET /api/customers/:id/portal-overview -> what the customer currently sees / needs to act on
+router.get("/:id/portal-overview", async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.id);
+    if (!customer || String(customer.organization) !== String(req.user.organization) || !(await canAccess(req, customer))) {
+      return res.status(404).json({ message: "Customer not found" });
+    }
+    const Project = require("../../models/Project");
+    const ProjectApproval = require("../../models/ProjectApproval");
+    const ProjectDelivery = require("../../models/ProjectDelivery");
+    const ProjectComment = require("../../models/ProjectComment");
+    const Invoice = require("../../models/Invoice");
+
+    const org = req.user.organization;
+    const scope = { organization: org, customerId: customer._id, isDeleted: false };
+    const PENDING = ["sent_to_customer", "viewed"];
+
+    const [portalUsers, projects, approvals, deliveries, invoices, comments] = await Promise.all([
+      User.find({ organization: org, customerId: customer._id, userType: "customer" }).select("status lastLoginAt"),
+      Project.find(scope).select("status isOngoing"),
+      ProjectApproval.find({ ...scope, status: { $in: PENDING } }).countDocuments(),
+      ProjectDelivery.find({ ...scope, status: { $in: PENDING } }).countDocuments(),
+      Invoice.find({ organization: org, customerId: customer._id, sharedToPortal: true, status: { $in: ["sent", "partially_paid", "overdue", "pending_bank_verification"] } }).countDocuments(),
+      ProjectComment.find({ ...scope, visibility: "shared", senderType: "customer" }).populate("projectId", "projectName").sort({ createdAt: -1 }).limit(5),
+    ]);
+
+    const activeProjects = projects.filter((p) => p.status !== "cancelled" && (p.isOngoing || !["delivered", "completed"].includes(p.status))).length;
+    const lastLoginAt = portalUsers.reduce((m, u) => (u.lastLoginAt && (!m || u.lastLoginAt > m) ? u.lastLoginAt : m), null);
+    const portalStatus = !portalUsers.length ? "no_access" : portalUsers.some((u) => u.status === "active" && u.lastLoginAt) ? "active" : "invited";
+
+    return res.json({
+      portalStatus,
+      lastLoginAt,
+      totalProjects: projects.length,
+      activeProjects,
+      pendingApprovals: approvals,
+      pendingDeliveries: deliveries,
+      pendingInvoices: invoices,
+      recentComments: comments.map((c) => ({ _id: c._id, message: c.message, projectName: c.projectId?.projectName || "", createdAt: c.createdAt })),
+    });
+  } catch (err) {
+    console.error("portal-overview error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 // helper to load a tenant-scoped customer
 async function loadCustomer(req, res) {
   const customer = await Customer.findById(req.params.id);
