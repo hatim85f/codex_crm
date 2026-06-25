@@ -44,6 +44,10 @@ app.use("/api", require("./routes/api/projectComments"));
 app.use("/api/support", require("./routes/api/support"));
 app.use("/api/contact-messages", require("./routes/api/contactMessages"));
 app.use("/api/notifications", require("./routes/api/notifications"));
+// Leads & Intake (internal-only)
+app.use("/api/potential-customers", require("./routes/api/potentialCustomers"));
+app.use("/api/whatsapp", require("./routes/api/whatsapp"));
+app.use("/api/meta-leads", require("./routes/api/metaLeads"));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

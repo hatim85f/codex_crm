@@ -9,7 +9,8 @@
     "dev": "node server.js",
     "seed:owner": "node scripts/seed-owner.js",
     "test:db": "node scripts/test-db-connection.js",
-    "seed:services": "node scripts/seed-services.js"
+    "seed:services": "node scripts/seed-services.js",
+    "seed:leads": "node scripts/seed-leads.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
