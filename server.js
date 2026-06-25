@@ -8,8 +8,9 @@ const connectDB = require("./config/db");
 const app = express();
 
 app.use(cors());
-// Stripe webhook needs the raw request body for signature verification — mount before json.
+// Stripe & Meta webhooks need the raw request body for signature verification — mount before json.
 app.use("/api/stripe", require("./routes/api/stripe"));
+app.use("/api/meta", require("./routes/api/meta"));
 app.use(express.json());
 
 connectDB();
