@@ -3,8 +3,13 @@ const express = require("express");
 const router = express.Router();
 const FileRecord = require("../../models/FileRecord");
 const Project = require("../../models/Project");
+const Quotation = require("../../models/Quotation");
+const Invoice = require("../../models/Invoice");
+const Customer = require("../../models/Customer");
 const { auth, requireRole } = require("../../middleware/auth");
 const { canSeeAllLeads: isAdmin, visibleAssigneeIds } = require("../../services/leadsScope");
+const { categorize } = require("../../services/fileType");
+const { collectVirtualFiles, SECTIONS } = require("../../services/virtualFiles");
 const { FILE_TYPES, FILE_RELATED_MODULES, FILE_VISIBILITIES } = require("../../models/FileRecord");
 
 // Every internal role can use the File Center.
@@ -15,21 +20,6 @@ router.use(auth);
 router.use(requireRole(...INTERNAL));
 
 const POPULATE = [{ path: "uploadedBy", select: "name email avatar" }];
-
-// Categorize a file into a coarse type for badges/filters.
-function categorize(mimeType = "", name = "") {
-  const m = String(mimeType).toLowerCase();
-  const ext = String(name).toLowerCase().split(".").pop();
-  if (m.includes("pdf") || ext === "pdf") return "pdf";
-  if (["xls", "xlsx", "csv"].includes(ext) || m.includes("spreadsheet") || m.includes("excel")) return "sheet";
-  if (["ppt", "pptx"].includes(ext) || m.includes("presentation") || m.includes("powerpoint")) return "presentation";
-  if (["doc", "docx", "rtf", "txt"].includes(ext) || m.includes("word") || m.includes("msword") || m.startsWith("text/")) return "doc";
-  if (m.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) return "image";
-  if (m.startsWith("video/") || ["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return "video";
-  if (m.startsWith("audio/") || ["mp3", "wav", "ogg", "m4a"].includes(ext)) return "audio";
-  if (["zip", "rar", "7z", "tar", "gz"].includes(ext) || m.includes("zip") || m.includes("compressed")) return "archive";
-  return "other";
-}
 
 // Projects the (non-admin) user may access — they lead it or are a member.
 async function accessibleProjectIds(req) {
@@ -165,6 +155,142 @@ router.post("/upload", async (req, res) => {
     return res.status(201).json(out);
   } catch (err) {
     console.error("upload file error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ---- Folders & aggregation (live virtual files: quotations, invoices, designs) ----
+
+// Customers this user may browse: null = all (admins), else the set tied to their
+// projects + the quotations/invoices they created.
+async function folderScope(req) {
+  if (isAdmin(req)) return { customerIds: null };
+  const org = req.user.organization;
+  const set = new Set();
+  const [projs, qs, invs] = await Promise.all([
+    Project.find({ organization: org, isDeleted: false, $or: [{ projectLeaderId: req.user.id }, { assignedMembers: req.user.id }] }).select("customerId").lean(),
+    Quotation.find({ organization: org, createdBy: req.user.id }).select("customerId").lean(),
+    Invoice.find({ organization: org, createdBy: req.user.id }).select("customerId").lean(),
+  ]);
+  [...projs, ...qs, ...invs].forEach((d) => d.customerId && set.add(String(d.customerId)));
+  return { customerIds: [...set] };
+}
+
+// All file entries (virtual sources + real uploads) the user may see, normalized
+// and tagged with a customerId so they can be grouped into client folders.
+async function buildEntries(req) {
+  const org = req.user.organization;
+  const { customerIds } = await folderScope(req);
+  const virtual = await collectVirtualFiles({ organization: org, customerIds });
+
+  const uploads = await FileRecord.find({ organization: org, isDeleted: false, isArchived: false })
+    .populate(POPULATE).lean();
+  // Resolve project-linked uploads to their customer.
+  const projIds = uploads
+    .filter((u) => ["project", "project_step", "approval_request", "final_delivery"].includes(u.relatedModule) && u.relatedRecordId)
+    .map((u) => u.relatedRecordId);
+  const projMap = {};
+  if (projIds.length) {
+    const ps = await Project.find({ _id: { $in: projIds } }).select("customerId").lean();
+    ps.forEach((p) => { projMap[String(p._id)] = p.customerId ? String(p.customerId) : null; });
+  }
+  const uploadEntries = uploads.map((u) => {
+    let customerId = null;
+    if (u.relatedModule === "customer") customerId = u.relatedRecordId ? String(u.relatedRecordId) : null;
+    else if (u.relatedRecordId && projMap[String(u.relatedRecordId)] !== undefined) customerId = projMap[String(u.relatedRecordId)];
+    return {
+      id: `upload:${u._id}`, source: "upload", section: "uploads", recordId: String(u._id),
+      fileName: u.fileName, fileType: u.fileType, downloadMode: "url", fileUrl: u.fileUrl,
+      routeName: "FileDetail", routeId: String(u._id), customerId,
+      label: u.relatedLabel || "", date: u.createdAt, size: u.fileSize,
+      uploadedBy: u.uploadedBy, visibility: u.visibility,
+    };
+  });
+
+  let all = [...virtual, ...uploadEntries];
+  if (customerIds) {
+    const cset = new Set(customerIds);
+    all = all.filter((e) => e.source !== "upload"
+      ? true
+      : (e.customerId && cset.has(e.customerId)) || String(e.uploadedBy?._id || e.uploadedBy || "") === String(req.user.id));
+  }
+  return all;
+}
+
+const emptyCounts = () => SECTIONS.reduce((a, s) => ({ ...a, [s]: 0 }), { total: 0 });
+
+// GET /files/folders  — one folder per client + an "Internal / Unfiled" bucket
+router.get("/folders", async (req, res) => {
+  try {
+    const entries = await buildEntries(req);
+    const groups = {};
+    for (const e of entries) {
+      const key = e.customerId || "unfiled";
+      if (!groups[key]) groups[key] = { customerId: e.customerId || null, counts: emptyCounts(), lastActivity: null };
+      const g = groups[key];
+      g.counts[e.section] = (g.counts[e.section] || 0) + 1;
+      g.counts.total += 1;
+      const t = e.date ? new Date(e.date).getTime() : 0;
+      if (t && (!g.lastActivity || t > g.lastActivity)) g.lastActivity = t;
+    }
+    const ids = Object.values(groups).map((g) => g.customerId).filter(Boolean);
+    const names = {};
+    if (ids.length) {
+      const custs = await Customer.find({ _id: { $in: ids } }).select("displayName companyName").lean();
+      custs.forEach((c) => { names[String(c._id)] = c.displayName || c.companyName || "Customer"; });
+    }
+    const folders = Object.entries(groups).map(([key, g]) => ({
+      id: key,
+      customerId: g.customerId,
+      name: g.customerId ? (names[g.customerId] || "Customer") : "Internal / Unfiled",
+      counts: g.counts,
+      lastActivity: g.lastActivity,
+    })).sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+    return res.json(folders);
+  } catch (err) {
+    console.error("file folders error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET /files/index  — flat searchable union across every source (global search)
+router.get("/index", async (req, res) => {
+  try {
+    const { search, type, source, section } = req.query;
+    let entries = await buildEntries(req);
+    if (type) entries = entries.filter((e) => e.fileType === type);
+    if (source) entries = entries.filter((e) => e.source === source);
+    if (section) entries = entries.filter((e) => e.section === section);
+    if (search) {
+      const q = String(search).trim().toLowerCase();
+      entries = entries.filter((e) => [e.fileName, e.label].join(" ").toLowerCase().includes(q));
+    }
+    entries.sort((a, b) => (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0));
+    return res.json(entries.slice(0, 300));
+  } catch (err) {
+    console.error("file index error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET /files/folders/:customerId  — one client's files, split into sections
+router.get("/folders/:customerId", async (req, res) => {
+  try {
+    const cid = req.params.customerId;
+    const entries = await buildEntries(req);
+    const mine = entries.filter((e) => (cid === "unfiled" ? !e.customerId : e.customerId === cid));
+    const sections = {};
+    SECTIONS.forEach((s) => { sections[s] = []; });
+    mine.forEach((e) => { (sections[e.section] || (sections[e.section] = [])).push(e); });
+    Object.values(sections).forEach((arr) => arr.sort((a, b) => (new Date(b.date).getTime() || 0) - (new Date(a.date).getTime() || 0)));
+    let name = "Internal / Unfiled";
+    if (cid !== "unfiled") {
+      const c = await Customer.findById(cid).select("displayName companyName").lean();
+      name = c ? (c.displayName || c.companyName || "Customer") : "Customer";
+    }
+    return res.json({ customerId: cid === "unfiled" ? null : cid, name, sections });
+  } catch (err) {
+    console.error("file folder error:", err.message);
     return res.status(500).json({ message: "Server error" });
   }
 });
