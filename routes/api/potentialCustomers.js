@@ -7,13 +7,15 @@ const WhatsAppConversation = require("../../models/WhatsAppConversation");
 const { auth, requireRole } = require("../../middleware/auth");
 const { logActivity } = require("../../services/activityLog");
 const { canSeeAllLeads, assignedScope } = require("../../services/leadsScope");
+const { ensureAssignmentTask } = require("../../services/autoTask");
 const { PC_STATUSES, PC_PRIORITIES } = require("../../models/PotentialCustomer");
 
-const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
+// Potential Customers are restricted to owner/admin/team_leader. Regular members
+// don't browse leads — they get a "call" task (with the phone) when one is assigned.
 const MANAGE = ["owner_admin", "admin", "team_leader"];
 
 router.use(auth);
-router.use(requireRole(...INTERNAL));
+router.use(requireRole(...MANAGE));
 
 const POPULATE = [
   { path: "assignedTo", select: "name email avatar" },
@@ -175,6 +177,27 @@ router.patch("/:id/assign", requireRole(...MANAGE), async (req, res) => {
     lead.assignedTo = req.body?.assignedTo || null;
     lead.updatedBy = req.user.id;
     await lead.save();
+    // Hand the assignee a "call" task with the contact details + phone.
+    if (lead.assignedTo) {
+      const lines = [`Call ${lead.name}.`, `Phone: ${lead.phone || lead.whatsapp || "—"}`];
+      if (lead.companyName) lines.push(`Company: ${lead.companyName}`);
+      if (lead.email) lines.push(`Email: ${lead.email}`);
+      if (lead.interestedService) lines.push(`Interested in: ${lead.interestedService}`);
+      if (lead.firstMessage) lines.push(`First message: ${lead.firstMessage}`);
+      await ensureAssignmentTask({
+        organization: req.user.organization,
+        assignedTo: lead.assignedTo,
+        createdBy: req.user.id,
+        type: "call",
+        title: `Call ${lead.name}`,
+        contactName: lead.name,
+        contactPhone: lead.phone || lead.whatsapp || "",
+        relatedModule: "potential_customer",
+        relatedRecordId: lead._id,
+        relatedLabel: lead.name,
+        description: lines.join("\n"),
+      });
+    }
     const out = await PotentialCustomer.findById(lead._id).populate(POPULATE);
     return res.json(out);
   } catch (err) {

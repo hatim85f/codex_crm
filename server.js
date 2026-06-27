@@ -51,9 +51,13 @@ app.use("/api/meta-leads", require("./routes/api/metaLeads"));
 // Task Center / Follow-up Center (internal-only)
 app.use("/api/tasks", require("./routes/api/tasks"));
 
+const { startTaskReminderScheduler } = require("./services/taskReminders");
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Codex CRM API on :${PORT}`);
+  // Background sweep: sends task reminder + overdue notifications.
+  startTaskReminderScheduler();
 });
 
 process.on("SIGINT", async () => {

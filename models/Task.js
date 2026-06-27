@@ -41,10 +41,24 @@ const TaskSchema = new Schema(
     description: { type: String, default: "" },
     type: { type: String, enum: TASK_TYPES, default: "general_task", index: true },
 
+    // Business-form grouping for the manager/admin Task Center (derived from the
+    // assignee's role unless set explicitly). See services/departments.js.
+    department: {
+      type: String,
+      enum: ["general", "sales", "marketing", "development", "design", "content", "accounting", "support", "management"],
+      default: "general",
+      index: true,
+    },
+
     // Polymorphic link to any CRM record (denormalized label for fast display).
     relatedModule: { type: String, enum: RELATED_MODULES, default: "none", index: true },
     relatedRecordId: { type: Schema.Types.ObjectId, default: null, index: true },
     relatedLabel: { type: String, default: "" },
+
+    // Contact to reach for call / whatsapp_reply tasks (so an assigned member can
+    // act without access to the WhatsApp inbox or the lead record).
+    contactName: { type: String, default: "" },
+    contactPhone: { type: String, default: "" },
 
     assignedTo: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
@@ -55,6 +69,11 @@ const TaskSchema = new Schema(
 
     dueDate: { type: Date, default: null, index: true },
     reminderDate: { type: Date, default: null },
+
+    // Set when the reminder / overdue notification has been sent, so the
+    // background sweep delivers each one exactly once. See services/taskReminders.js.
+    reminderSentAt: { type: Date, default: null },
+    overdueNotifiedAt: { type: Date, default: null },
 
     attachments: { type: [AttachmentSchema], default: [] },
     internalNotes: { type: String, default: "" },

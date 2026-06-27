@@ -4,11 +4,15 @@ const router = express.Router();
 const Task = require("../../models/Task");
 const TaskActivity = require("../../models/TaskActivity");
 const User = require("../../models/User");
+const Project = require("../../models/Project");
 const { auth, requireRole } = require("../../middleware/auth");
 const { canSeeAllLeads: isAdmin, visibleAssigneeIds } = require("../../services/leadsScope");
+const { DEPARTMENTS, departmentForRole } = require("../../services/departments");
 const { TASK_STATUSES, TASK_TYPES, TASK_PRIORITIES, TASK_RELATED_MODULES } = require("../../models/Task");
 
-const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
+// Every internal role can use the Task Center (it's where members see assigned work).
+const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader",
+  "developer", "designer", "content_creator", "accountant", "support"];
 const MANAGE = ["owner_admin", "admin", "team_leader"];
 
 router.use(auth);
@@ -19,12 +23,50 @@ const POPULATE = [
   { path: "createdBy", select: "name avatar" },
 ];
 
-// Non-admins see tasks assigned to them or created by them (managers also see
-// their team members'). Returns a Mongo clause to AND into a query, or null for admins.
+// Ids of projects this user leads (any role can lead a project).
+async function ledProjectIds(req) {
+  const projs = await Project.find({
+    organization: req.user.organization,
+    projectLeaderId: req.user.id,
+    isDeleted: false,
+  }).select("_id assignedMembers");
+  return projs;
+}
+
+// People whose tasks this (non-admin) user may see / assign to:
+//   self  +  team members (if team_leader)  +  members of projects they lead.
+async function visibleIdsForTasks(req) {
+  const ids = new Set(await visibleAssigneeIds(req)); // self (+ team members for team_leader)
+  const projs = await ledProjectIds(req);
+  projs.forEach((p) => (p.assignedMembers || []).forEach((m) => m && ids.add(String(m))));
+  return [...ids];
+}
+
+// Visibility clause for the task list, or null for admins (who see everything).
+//   - owner_admin / admin -> all
+//   - everyone else       -> tasks for their people OR tasks on projects they lead
 async function taskScope(req) {
   if (isAdmin(req)) return null;
-  const ids = await visibleAssigneeIds(req); // self (+ team members for team_leader)
-  return { $or: [{ assignedTo: { $in: ids } }, { createdBy: { $in: ids } }] };
+  const ids = await visibleIdsForTasks(req);
+  const or = [{ assignedTo: { $in: ids } }, { createdBy: { $in: ids } }];
+  const projs = await ledProjectIds(req);
+  if (projs.length) {
+    or.push({
+      relatedModule: { $in: ["project", "project_step"] },
+      relatedRecordId: { $in: projs.map((p) => p._id) },
+    });
+  }
+  return { $or: or };
+}
+
+// Resolve a task's department: explicit value wins, else derive from the assignee's role.
+async function resolveDepartment(department, assignedTo) {
+  if (DEPARTMENTS.includes(department)) return department;
+  if (assignedTo) {
+    const u = await User.findById(assignedTo).select("role");
+    if (u) return departmentForRole(u.role);
+  }
+  return "general";
 }
 
 async function logActivity(req, taskId, type, extra = {}) {
@@ -51,10 +93,8 @@ async function loadTask(req, res) {
   }
   const scope = await taskScope(req);
   if (scope) {
-    const ids = (scope.$or[0].assignedTo.$in || []).map(String);
-    const a = String(task.assignedTo?._id || task.assignedTo || "");
-    const c = String(task.createdBy?._id || task.createdBy || "");
-    if (!ids.includes(a) && !ids.includes(c)) { res.status(404).json({ message: "Task not found" }); return null; }
+    const ok = await Task.exists({ _id: task._id, ...scope });
+    if (!ok) { res.status(404).json({ message: "Task not found" }); return null; }
   }
   return task;
 }
@@ -65,13 +105,14 @@ const endOfToday = () => { const d = new Date(); d.setHours(23, 59, 59, 999); re
 // GET /tasks  (filters: status, type, priority, assignedTo, relatedModule, search, dueFrom, dueTo)
 router.get("/", async (req, res) => {
   try {
-    const { status, type, priority, assignedTo, relatedModule, search, dueFrom, dueTo } = req.query;
+    const { status, type, priority, assignedTo, relatedModule, department, search, dueFrom, dueTo } = req.query;
     const query = { organization: req.user.organization, isDeleted: false };
     if (status) query.status = status;
     if (type) query.type = type;
     if (priority) query.priority = priority;
     if (assignedTo) query.assignedTo = assignedTo;
     if (relatedModule) query.relatedModule = relatedModule;
+    if (department) query.department = department;
     if (dueFrom || dueTo) {
       query.dueDate = {};
       if (dueFrom) query.dueDate.$gte = new Date(dueFrom);
@@ -136,17 +177,34 @@ router.post("/", async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.title) return res.status(400).json({ message: "Title is required" });
+
+    // Who can assign to whom:
+    //   owner_admin / admin -> anyone
+    //   team_leader / project leader -> their team + members of projects they lead
+    //   everyone else -> only themselves
+    let assignedTo = b.assignedTo || null;
+    if (!isAdmin(req)) {
+      const allowed = await visibleIdsForTasks(req); // self + team + led-project members
+      if (assignedTo && !allowed.includes(String(assignedTo))) {
+        return res.status(403).json({ message: "You can only assign tasks to yourself, your team, or members of projects you lead." });
+      }
+    }
+
+    const department = await resolveDepartment(b.department, assignedTo);
     const taskNumber = (await Task.countDocuments({ organization: req.user.organization })) + 1001;
     const task = await Task.create({
       organization: req.user.organization,
       taskNumber,
       title: b.title,
       description: b.description || "",
+      department,
       type: TASK_TYPES.includes(b.type) ? b.type : "general_task",
       relatedModule: TASK_RELATED_MODULES.includes(b.relatedModule) ? b.relatedModule : "none",
       relatedRecordId: b.relatedRecordId || null,
       relatedLabel: b.relatedLabel || "",
-      assignedTo: b.assignedTo || null,
+      contactName: b.contactName || "",
+      contactPhone: b.contactPhone || "",
+      assignedTo,
       createdBy: req.user.id,
       updatedBy: req.user.id,
       priority: TASK_PRIORITIES.includes(b.priority) ? b.priority : "medium",
@@ -184,12 +242,31 @@ router.patch("/:id", async (req, res) => {
     if (!task) return;
     const b = req.body || {};
     const prevDue = task.dueDate ? new Date(task.dueDate).getTime() : null;
+    const prevReminder = task.reminderDate ? new Date(task.reminderDate).getTime() : null;
     const prevAssignee = String(task.assignedTo?._id || task.assignedTo || "");
 
     const fields = ["title", "description", "type", "relatedModule", "relatedRecordId",
-      "relatedLabel", "priority", "dueDate", "reminderDate", "internalNotes"];
+      "relatedLabel", "contactName", "contactPhone", "priority", "dueDate", "reminderDate", "internalNotes"];
     fields.forEach((f) => { if (b[f] !== undefined) task[f] = b[f]; });
-    if (b.assignedTo !== undefined) task.assignedTo = b.assignedTo || null;
+
+    // Rescheduling re-arms the reminder/overdue notifications so they fire again.
+    const newReminder = task.reminderDate ? new Date(task.reminderDate).getTime() : null;
+    if (b.reminderDate !== undefined && newReminder !== prevReminder) task.reminderSentAt = null;
+    const nextDue = task.dueDate ? new Date(task.dueDate).getTime() : null;
+    if (b.dueDate !== undefined && nextDue !== prevDue) task.overdueNotifiedAt = null;
+    if (DEPARTMENTS.includes(b.department)) task.department = b.department;
+    if (b.assignedTo !== undefined) {
+      const next = b.assignedTo || null;
+      if (next && !isAdmin(req)) {
+        const allowed = await visibleIdsForTasks(req);
+        if (!allowed.includes(String(next))) {
+          return res.status(403).json({ message: "You can only assign tasks to yourself, your team, or members of projects you lead." });
+        }
+      }
+      task.assignedTo = next;
+      // Re-derive department from the new assignee unless it was set explicitly.
+      if (!DEPARTMENTS.includes(b.department)) task.department = await resolveDepartment(null, next);
+    }
     task.updatedBy = req.user.id;
     await task.save();
 
@@ -251,12 +328,20 @@ router.patch("/:id/assign", requireRole(...MANAGE), async (req, res) => {
   try {
     const task = await loadTask(req, res);
     if (!task) return;
+    const next = req.body?.assignedTo || null;
+    if (next && !isAdmin(req)) {
+      const allowed = await visibleIdsForTasks(req);
+      if (!allowed.includes(String(next))) {
+        return res.status(403).json({ message: "You can only assign tasks to yourself, your team, or members of projects you lead." });
+      }
+    }
     const prev = task.assignedTo ? await User.findById(task.assignedTo).select("name") : null;
-    task.assignedTo = req.body?.assignedTo || null;
+    task.assignedTo = next;
+    task.department = await resolveDepartment(null, next);
     task.updatedBy = req.user.id;
     await task.save();
-    const next = task.assignedTo ? await User.findById(task.assignedTo).select("name") : null;
-    await logActivity(req, task._id, "reassigned", { oldValue: prev?.name || "Unassigned", newValue: next?.name || "Unassigned" });
+    const nextUser = task.assignedTo ? await User.findById(task.assignedTo).select("name") : null;
+    await logActivity(req, task._id, "reassigned", { oldValue: prev?.name || "Unassigned", newValue: nextUser?.name || "Unassigned" });
     const out = await Task.findById(task._id).populate(POPULATE);
     return res.json(out);
   } catch (err) {

@@ -8,12 +8,15 @@ const { auth, requireRole } = require("../../middleware/auth");
 const { canSeeAllLeads, assignedScope } = require("../../services/leadsScope");
 const { WA_CONV_STATUSES } = require("../../models/WhatsAppConversation");
 const { sendWhatsAppText, sendWhatsAppMedia } = require("../../services/whatsappSend");
+const { ensureAssignmentTask } = require("../../services/autoTask");
 
-const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
+// WhatsApp inbox is restricted to owner/admin/team_leader. Regular members never
+// see conversations directly — they receive a task (with the phone number) when a
+// conversation is assigned to them.
 const MANAGE = ["owner_admin", "admin", "team_leader"];
 
 router.use(auth);
-router.use(requireRole(...INTERNAL));
+router.use(requireRole(...MANAGE));
 
 // GET /whatsapp/conversations  (filters: status, assignedTo, search)
 router.get("/conversations", async (req, res) => {
@@ -167,6 +170,28 @@ router.patch("/conversations/:id/assign", requireRole(...MANAGE), async (req, re
     // Keep the linked lead's owner in sync when assigning the conversation.
     if (conv.potentialCustomerId?._id && conv.assignedTo) {
       await PotentialCustomer.findByIdAndUpdate(conv.potentialCustomerId._id, { assignedTo: conv.assignedTo });
+    }
+    // Give the assignee a task to action this conversation (they don't see the inbox).
+    if (conv.assignedTo) {
+      const pcDoc = conv.potentialCustomerId;
+      const name = conv.customerName || pcDoc?.name || conv.phoneNumber;
+      const lines = [`Reply to ${name} on WhatsApp.`, `Phone: ${conv.phoneNumber}`];
+      if (pcDoc?.companyName) lines.push(`Company: ${pcDoc.companyName}`);
+      if (pcDoc?.email) lines.push(`Email: ${pcDoc.email}`);
+      if (pcDoc?.interestedService) lines.push(`Interested in: ${pcDoc.interestedService}`);
+      await ensureAssignmentTask({
+        organization: req.user.organization,
+        assignedTo: conv.assignedTo,
+        createdBy: req.user.id,
+        type: "whatsapp_reply",
+        title: `WhatsApp: ${name}`,
+        contactName: name,
+        contactPhone: conv.phoneNumber,
+        relatedModule: "whatsapp_conversation",
+        relatedRecordId: conv._id,
+        relatedLabel: name,
+        description: lines.join("\n"),
+      });
     }
     const out = await WhatsAppConversation.findById(conv._id).populate("assignedTo", "name avatar");
     return res.json(out);
