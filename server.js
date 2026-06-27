@@ -50,6 +50,8 @@ app.use("/api/whatsapp", require("./routes/api/whatsapp"));
 app.use("/api/meta-leads", require("./routes/api/metaLeads"));
 // Task Center / Follow-up Center (internal-only)
 app.use("/api/tasks", require("./routes/api/tasks"));
+// File Center / Document Center (internal-only)
+app.use("/api/files", require("./routes/api/files"));
 
 const { startTaskReminderScheduler } = require("./services/taskReminders");
 
