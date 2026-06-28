@@ -9,6 +9,7 @@ const BankStatement = require("../../models/BankStatement");
 const AuditItem = require("../../models/AuditItem");
 const { auth, requireRole } = require("../../middleware/auth");
 const { computeOverview, computePnl, auditAutoAvailability, applyAuditAuto } = require("../../services/accountingReports");
+const { syncOrderExpenses, removeOrderExpenses } = require("../../services/ecomLedger");
 const {
   EXPENSE_CATEGORIES, EXPENSE_STATUSES, PAYMENT_METHODS, BUSINESS_LINES,
   GATEWAY_PROVIDERS, GATEWAY_STATUSES, BANK_STATEMENT_STATUSES, AUDIT_STATUSES, AUDIT_ITEMS,
@@ -132,11 +133,9 @@ router.delete("/expenses/:id", canManage, async (req, res) => {
 });
 
 // ---------------- eCommerce order profit ----------------
-const ecomFields = ["storeName", "orderNumber", "businessLine", "vendorSource",
-  "customerPaidAmount", "currency", "aedAmount", "products",
-  "shippingCost", "courierDeliveryCost", "packingHandlingCost",
-  "paymentGatewayFeePct", "shopifyFeePct", "orderDate", "notes",
-  "customerInvoiceFiles", "goodsReceiptFiles"];
+const ecomFields = ["storeName", "businessLine", "vendorSource", "orders",
+  "productBuyingCost", "shippingCost", "courierDeliveryCost", "packingHandlingCost",
+  "paymentGatewayFeePct", "shopifyFeePct", "orderDate", "notes", "goodsReceiptFiles"];
 
 router.get("/ecommerce", async (req, res) => {
   try {
@@ -156,6 +155,7 @@ router.post("/ecommerce", canManage, async (req, res) => {
     ecomFields.forEach((f) => { if (b[f] !== undefined) doc[f] = b[f]; });
     if (!BUSINESS_LINES.includes(doc.businessLine)) doc.businessLine = "own_ecommerce_dropshipping";
     await doc.save(); // pre-save computes totalCost/netProfit/profitMargin
+    await syncOrderExpenses(doc, req.user.id); // post COGS + fees to Expenses
     return res.status(201).json(doc);
   } catch (err) {
     console.error("create ecom error:", err.message);
@@ -179,6 +179,7 @@ router.put("/ecommerce/:id", canManage, async (req, res) => {
     ecomFields.forEach((f) => { if (b[f] !== undefined) d[f] = b[f]; });
     d.updatedBy = req.user.id;
     await d.save();
+    await syncOrderExpenses(d, req.user.id); // keep linked Expenses in sync
     return res.json(d);
   } catch (err) {
     console.error("update ecom error:", err.message);
@@ -191,6 +192,7 @@ router.delete("/ecommerce/:id", canManage, async (req, res) => {
     const d = await EcommerceOrderProfit.findOne({ _id: req.params.id, organization: org(req), isDeleted: false });
     if (!d) return res.status(404).json({ message: "Record not found" });
     d.isDeleted = true; d.updatedBy = req.user.id; await d.save();
+    await removeOrderExpenses(org(req), d._id); // remove the linked Expenses
     return res.json({ ok: true, _id: d._id });
   } catch (err) { return res.status(500).json({ message: "Server error" }); }
 });

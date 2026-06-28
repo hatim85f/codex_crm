@@ -25,14 +25,20 @@ async function computeOverview(organization, { from, to, businessLine } = {}) {
   const expMatch = { organization, isDeleted: false, ...dateClause("expenseDate", from, to) };
   if (businessLine) expMatch.businessLine = businessLine;
 
-  const [invoices, expenses, bankCount] = await Promise.all([
+  const ecomMatch = { organization, isDeleted: false, ...dateClause("orderDate", from, to) };
+  if (businessLine) ecomMatch.businessLine = businessLine;
+
+  const [invoices, expenses, ecom, bankCount] = await Promise.all([
     Invoice.find(invMatch).select("grandTotal paidAmount balance").lean(),
     Expense.find(expMatch).select("aedAmount status").lean(),
+    EcommerceOrderProfit.find(ecomMatch).select("aedAmount").lean(),
     BankAccount.countDocuments({ organization, status: "active" }),
   ]);
 
-  const totalIncome = round(sum(invoices, (i) => i.grandTotal));
-  const collected = round(sum(invoices, (i) => i.paidAmount));
+  // Income = client invoices + eCommerce sales (their costs are in the expense ledger).
+  const ecomRevenue = round(sum(ecom, (e) => e.aedAmount));
+  const totalIncome = round(sum(invoices, (i) => i.grandTotal) + ecomRevenue);
+  const collected = round(sum(invoices, (i) => i.paidAmount) + ecomRevenue);
   const outstanding = round(sum(invoices.filter((i) => (i.balance || 0) > 0), (i) => i.balance));
   const outstandingCount = invoices.filter((i) => (i.balance || 0) > 0).length;
   const totalExpenses = round(sum(expenses, (e) => e.aedAmount));
@@ -62,32 +68,25 @@ async function computePnl(organization, { from, to, businessLine } = {}) {
   const [invoices, expenses, ecom] = await Promise.all([
     Invoice.find(invMatch).select("grandTotal").lean(),
     Expense.find(expMatch).select("aedAmount category").lean(),
-    EcommerceOrderProfit.find(ecomMatch).select("aedAmount productBuyingCost shippingCost courierDeliveryCost packingHandlingCost paymentGatewayFee shopifyFee").lean(),
+    EcommerceOrderProfit.find(ecomMatch).select("aedAmount").lean(),
   ]);
 
   const invoiceRevenue = round(sum(invoices, (i) => i.grandTotal));
+  // eCommerce sales are income; their COSTS are posted to Expenses (services/ecomLedger.js)
+  // so we only read revenue here — costs come from the expense ledger below (no double count).
   const ecomRevenue = round(sum(ecom, (e) => e.aedAmount));
   const revenue = round(invoiceRevenue + ecomRevenue);
 
-  // Expenses grouped by category.
+  // Expenses grouped by category (includes auto-posted eCommerce COGS + fees).
   const byCat = {};
   expenses.forEach((e) => { byCat[e.category] = (byCat[e.category] || 0) + (Number(e.aedAmount) || 0); });
 
-  const ecomCogs = round(sum(ecom, (e) => (e.productBuyingCost || 0) + (e.shippingCost || 0) + (e.courierDeliveryCost || 0) + (e.packingHandlingCost || 0)));
-  const ecomOpex = round(sum(ecom, (e) => (e.paymentGatewayFee || 0) + (e.shopifyFee || 0)));
-
-  const cogsExpenses = round(COGS_CATEGORIES.reduce((s, c) => s + (byCat[c] || 0), 0));
-  const cogs = round(cogsExpenses + ecomCogs);
-
+  const cogs = round(COGS_CATEGORIES.reduce((s, c) => s + (byCat[c] || 0), 0));
   const opexCats = Object.keys(byCat).filter((c) => !COGS_CATEGORIES.includes(c));
-  const opexExpenses = round(opexCats.reduce((s, c) => s + byCat[c], 0));
-  const operatingExpenses = round(opexExpenses + ecomOpex);
+  const operatingExpenses = round(opexCats.reduce((s, c) => s + byCat[c], 0));
 
   const netProfit = round(revenue - cogs - operatingExpenses);
   const margin = revenue > 0 ? Math.round((netProfit / revenue) * 1000) / 10 : 0;
-
-  const opexLines = opexCats.map((c) => ({ key: c, amount: round(byCat[c]) }));
-  if (ecomOpex) opexLines.push({ key: "ecommerce_fees", amount: ecomOpex });
 
   return {
     revenue,
@@ -100,11 +99,8 @@ async function computePnl(organization, { from, to, businessLine } = {}) {
         invoiceRevenue ? { key: "service_invoices", amount: invoiceRevenue } : null,
         ecomRevenue ? { key: "ecommerce_sales", amount: ecomRevenue } : null,
       ].filter(Boolean),
-      cogs: [
-        ...COGS_CATEGORIES.filter((c) => byCat[c]).map((c) => ({ key: c, amount: round(byCat[c]) })),
-        ecomCogs ? { key: "ecommerce_cogs", amount: ecomCogs } : null,
-      ].filter(Boolean),
-      opex: opexLines,
+      cogs: COGS_CATEGORIES.filter((c) => byCat[c]).map((c) => ({ key: c, amount: round(byCat[c]) })),
+      opex: opexCats.map((c) => ({ key: c, amount: round(byCat[c]) })),
     },
   };
 }

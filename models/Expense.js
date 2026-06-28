@@ -29,6 +29,10 @@ const ExpenseSchema = new Schema(
     notes: { type: String, default: "" },
     status: { type: String, enum: EXPENSE_STATUSES, default: "pending", index: true },
 
+    // Auto-posted from an eCommerce order (so it's idempotent + traceable).
+    sourceOrderProfitId: { type: Schema.Types.ObjectId, ref: "EcommerceOrderProfit", default: null, index: true },
+    sourceKind: { type: String, default: "" }, // "cogs" | "fees"
+
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     updatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     isDeleted: { type: Boolean, default: false, index: true },

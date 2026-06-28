@@ -8,10 +8,17 @@ const FileSchema = new Schema(
   { _id: false }
 );
 
-// An order can contain several products (we buy in bulk for many orders at once),
-// so the buying cost is the sum of all product lines = the order cost.
-const ProductSchema = new Schema(
-  { name: { type: String, default: "" }, quantity: { type: Number, default: 1 }, cost: { type: Number, default: 0 } }, // cost = unit cost
+// One batch buys for several customer orders at once (so shipping/handling/fees
+// are shared). Each order keeps its OWN number, amount paid and invoice files —
+// so income analysis stays per-order with no conflict.
+const OrderLineSchema = new Schema(
+  {
+    orderNumber: { type: String, default: "" },
+    customerPaidAmount: { type: Number, default: 0 },
+    currency: { type: String, default: "AED" },
+    aedAmount: { type: Number, default: 0 }, // revenue in AED for this order
+    customerInvoiceFiles: { type: [FileSchema], default: [] },
+  },
   { _id: false }
 );
 
@@ -22,18 +29,17 @@ const EcommerceOrderProfitSchema = new Schema(
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
 
     storeName: { type: String, required: true, trim: true },
-    orderNumber: { type: String, default: "" },
     businessLine: { type: String, enum: BUSINESS_LINES, default: "own_ecommerce_dropshipping", index: true },
     vendorSource: { type: String, default: "" },
 
-    // Revenue
+    // Customer orders in this batch (each keeps its own number + invoices).
+    orders: { type: [OrderLineSchema], default: [] },
+    // Revenue totals (computed from orders[]).
     customerPaidAmount: { type: Number, default: 0 },
-    currency: { type: String, default: "AED" },
-    aedAmount: { type: Number, default: 0 }, // revenue in AED, manually entered
+    aedAmount: { type: Number, default: 0 }, // total revenue in AED
 
-    // Costs
-    products: { type: [ProductSchema], default: [] },
-    productBuyingCost: { type: Number, default: 0 }, // computed = sum of product lines (= order cost)
+    // Shared costs for the whole batch
+    productBuyingCost: { type: Number, default: 0 }, // goods cost (one bill for all orders)
     shippingCost: { type: Number, default: 0 }, // vendor shipping (any method)
     courierDeliveryCost: { type: Number, default: 0 }, // last-mile to customer
     packingHandlingCost: { type: Number, default: 0 },
@@ -50,8 +56,7 @@ const EcommerceOrderProfitSchema = new Schema(
     profitMargin: { type: Number, default: 0 }, // %
 
     orderDate: { type: Date, default: Date.now, index: true },
-    // Accounting trail: invoices the customer paid (income) + goods purchase receipts (cost).
-    customerInvoiceFiles: { type: [FileSchema], default: [] },
+    // Shared goods purchase receipt(s) for the whole batch (customer invoices live per-order).
     goodsReceiptFiles: { type: [FileSchema], default: [] },
     notes: { type: String, default: "" },
 
@@ -63,8 +68,10 @@ const EcommerceOrderProfitSchema = new Schema(
 );
 
 EcommerceOrderProfitSchema.pre("save", function computeProfit(next) {
-  const revenue = Number(this.aedAmount) || 0;
-  this.productBuyingCost = round((this.products || []).reduce((s, p) => s + (Number(p.quantity) || 0) * (Number(p.cost) || 0), 0));
+  const orders = this.orders || [];
+  this.aedAmount = round(orders.reduce((s, o) => s + (Number(o.aedAmount) || 0), 0));
+  this.customerPaidAmount = round(orders.reduce((s, o) => s + (Number(o.customerPaidAmount) || 0), 0));
+  const revenue = this.aedAmount;
   this.paymentGatewayFee = round(revenue * (Number(this.paymentGatewayFeePct) || 0) / 100);
   this.shopifyFee = round(revenue * (Number(this.shopifyFeePct) || 0) / 100);
   const costs = this.productBuyingCost
