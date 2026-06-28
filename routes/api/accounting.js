@@ -132,9 +132,10 @@ router.delete("/expenses/:id", canManage, async (req, res) => {
 });
 
 // ---------------- eCommerce order profit ----------------
-const ecomFields = ["storeName", "orderNumber", "businessLine", "customerPaidAmount", "currency", "aedAmount",
-  "productBuyingCost", "vendorSource", "stripeFee", "shopifyFee", "shopAndShipCost", "courierDeliveryCost",
-  "packingHandlingCost", "employeeHandlingAllocation", "orderDate", "attachments", "notes"];
+const ecomFields = ["storeName", "orderNumber", "businessLine", "vendorSource",
+  "customerPaidAmount", "currency", "aedAmount", "products",
+  "shippingCost", "courierDeliveryCost", "packingHandlingCost",
+  "paymentGatewayFeePct", "shopifyFeePct", "orderDate", "attachments", "notes"];
 
 router.get("/ecommerce", async (req, res) => {
   try {

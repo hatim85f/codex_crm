@@ -62,7 +62,7 @@ async function computePnl(organization, { from, to, businessLine } = {}) {
   const [invoices, expenses, ecom] = await Promise.all([
     Invoice.find(invMatch).select("grandTotal").lean(),
     Expense.find(expMatch).select("aedAmount category").lean(),
-    EcommerceOrderProfit.find(ecomMatch).select("aedAmount productBuyingCost shopAndShipCost courierDeliveryCost packingHandlingCost stripeFee shopifyFee employeeHandlingAllocation").lean(),
+    EcommerceOrderProfit.find(ecomMatch).select("aedAmount productBuyingCost shippingCost courierDeliveryCost packingHandlingCost paymentGatewayFee shopifyFee").lean(),
   ]);
 
   const invoiceRevenue = round(sum(invoices, (i) => i.grandTotal));
@@ -73,8 +73,8 @@ async function computePnl(organization, { from, to, businessLine } = {}) {
   const byCat = {};
   expenses.forEach((e) => { byCat[e.category] = (byCat[e.category] || 0) + (Number(e.aedAmount) || 0); });
 
-  const ecomCogs = round(sum(ecom, (e) => (e.productBuyingCost || 0) + (e.shopAndShipCost || 0) + (e.courierDeliveryCost || 0) + (e.packingHandlingCost || 0)));
-  const ecomOpex = round(sum(ecom, (e) => (e.stripeFee || 0) + (e.shopifyFee || 0) + (e.employeeHandlingAllocation || 0)));
+  const ecomCogs = round(sum(ecom, (e) => (e.productBuyingCost || 0) + (e.shippingCost || 0) + (e.courierDeliveryCost || 0) + (e.packingHandlingCost || 0)));
+  const ecomOpex = round(sum(ecom, (e) => (e.paymentGatewayFee || 0) + (e.shopifyFee || 0)));
 
   const cogsExpenses = round(COGS_CATEGORIES.reduce((s, c) => s + (byCat[c] || 0), 0));
   const cogs = round(cogsExpenses + ecomCogs);

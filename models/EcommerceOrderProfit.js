@@ -8,6 +8,15 @@ const AttachmentSchema = new Schema(
   { _id: false }
 );
 
+// An order can contain several products (we buy in bulk for many orders at once),
+// so the buying cost is the sum of all product lines = the order cost.
+const ProductSchema = new Schema(
+  { name: { type: String, default: "" }, quantity: { type: Number, default: 1 }, cost: { type: Number, default: 0 } }, // cost = unit cost
+  { _id: false }
+);
+
+const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 const EcommerceOrderProfitSchema = new Schema(
   {
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
@@ -15,6 +24,7 @@ const EcommerceOrderProfitSchema = new Schema(
     storeName: { type: String, required: true, trim: true },
     orderNumber: { type: String, default: "" },
     businessLine: { type: String, enum: BUSINESS_LINES, default: "own_ecommerce_dropshipping", index: true },
+    vendorSource: { type: String, default: "" },
 
     // Revenue
     customerPaidAmount: { type: Number, default: 0 },
@@ -22,14 +32,17 @@ const EcommerceOrderProfitSchema = new Schema(
     aedAmount: { type: Number, default: 0 }, // revenue in AED, manually entered
 
     // Costs
-    productBuyingCost: { type: Number, default: 0 },
-    vendorSource: { type: String, default: "" },
-    stripeFee: { type: Number, default: 0 },
-    shopifyFee: { type: Number, default: 0 },
-    shopAndShipCost: { type: Number, default: 0 },
-    courierDeliveryCost: { type: Number, default: 0 },
+    products: { type: [ProductSchema], default: [] },
+    productBuyingCost: { type: Number, default: 0 }, // computed = sum of product lines (= order cost)
+    shippingCost: { type: Number, default: 0 }, // vendor shipping (any method)
+    courierDeliveryCost: { type: Number, default: 0 }, // last-mile to customer
     packingHandlingCost: { type: Number, default: 0 },
-    employeeHandlingAllocation: { type: Number, default: 0 },
+
+    // Percentage fees of revenue
+    paymentGatewayFeePct: { type: Number, default: 0 }, // % of revenue
+    shopifyFeePct: { type: Number, default: 0 }, // % of revenue
+    paymentGatewayFee: { type: Number, default: 0 }, // computed AED
+    shopifyFee: { type: Number, default: 0 }, // computed AED
 
     // Computed (set on save)
     totalCost: { type: Number, default: 0 },
@@ -47,15 +60,16 @@ const EcommerceOrderProfitSchema = new Schema(
   { timestamps: true }
 );
 
-// Keep totals/margin consistent with the inputs.
 EcommerceOrderProfitSchema.pre("save", function computeProfit(next) {
-  const costs = [
-    this.productBuyingCost, this.stripeFee, this.shopifyFee, this.shopAndShipCost,
-    this.courierDeliveryCost, this.packingHandlingCost, this.employeeHandlingAllocation,
-  ].reduce((s, n) => s + (Number(n) || 0), 0);
   const revenue = Number(this.aedAmount) || 0;
-  this.totalCost = Math.round(costs * 100) / 100;
-  this.netProfit = Math.round((revenue - costs) * 100) / 100;
+  this.productBuyingCost = round((this.products || []).reduce((s, p) => s + (Number(p.quantity) || 0) * (Number(p.cost) || 0), 0));
+  this.paymentGatewayFee = round(revenue * (Number(this.paymentGatewayFeePct) || 0) / 100);
+  this.shopifyFee = round(revenue * (Number(this.shopifyFeePct) || 0) / 100);
+  const costs = this.productBuyingCost
+    + (Number(this.shippingCost) || 0) + (Number(this.courierDeliveryCost) || 0)
+    + (Number(this.packingHandlingCost) || 0) + this.paymentGatewayFee + this.shopifyFee;
+  this.totalCost = round(costs);
+  this.netProfit = round(revenue - costs);
   this.profitMargin = revenue > 0 ? Math.round((this.netProfit / revenue) * 1000) / 10 : 0;
   next();
 });
