@@ -5,6 +5,7 @@ const Invoice = require("../../models/Invoice");
 const Expense = require("../../models/Expense");
 const BankStatement = require("../../models/BankStatement");
 const AuditItem = require("../../models/AuditItem");
+const EcommerceOrderProfit = require("../../models/EcommerceOrderProfit");
 const { auth, requireRole } = require("../../middleware/auth");
 const { computePnl, auditAutoAvailability, applyAuditAuto } = require("../../services/accountingReports");
 
@@ -41,6 +42,20 @@ router.get("/invoices", async (req, res) => {
     const items = await Invoice.find(q)
       .select("invoiceNumber customerId issueDate dueDate currency businessLine grandTotal paidAmount balance status paymentMethod bankTransferReceipt pdfUrl")
       .populate("customerId", "displayName companyName").sort({ issueDate: -1 }).limit(500);
+    return res.json(items);
+  } catch (err) { return res.status(500).json({ message: "Server error" }); }
+});
+
+// eCommerce sales (income proof side only) — read-only.
+router.get("/ecommerce", async (req, res) => {
+  try {
+    const q = { organization: org(req), isDeleted: false };
+    if (req.query.from || req.query.to) {
+      q.orderDate = {};
+      if (req.query.from) q.orderDate.$gte = new Date(req.query.from);
+      if (req.query.to) q.orderDate.$lte = new Date(req.query.to);
+    }
+    const items = await EcommerceOrderProfit.find(q).select("storeName businessLine orderDate aedAmount orders").sort({ orderDate: -1 }).limit(500);
     return res.json(items);
   } catch (err) { return res.status(500).json({ message: "Server error" }); }
 });
