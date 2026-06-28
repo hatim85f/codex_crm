@@ -22,7 +22,8 @@ const ExpenseSchema = new Schema(
     paymentMethod: { type: String, enum: PAYMENT_METHODS, default: "bank_transfer" },
     expenseDate: { type: Date, default: Date.now, index: true },
 
-    receiptAttachment: { fileName: { type: String, default: "" }, fileUrl: { type: String, default: "" } },
+    // A single expense can carry several receipt files (split bills, multi-page, etc.).
+    receiptAttachments: { type: [{ fileName: { type: String, default: "" }, fileUrl: { type: String, default: "" } }], default: [] },
     paymentProofAttachment: { fileName: { type: String, default: "" }, fileUrl: { type: String, default: "" } },
 
     notes: { type: String, default: "" },

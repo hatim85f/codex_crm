@@ -77,7 +77,9 @@ const expenseBody = (b, userId) => ({
   aedAmount: num(b.aedAmount),
   paymentMethod: PAYMENT_METHODS.includes(b.paymentMethod) ? b.paymentMethod : "bank_transfer",
   expenseDate: b.expenseDate || new Date(),
-  receiptAttachment: b.receiptAttachment || { fileName: "", fileUrl: "" },
+  receiptAttachments: Array.isArray(b.receiptAttachments)
+    ? b.receiptAttachments.filter((a) => a && a.fileUrl).map((a) => ({ fileName: a.fileName || "", fileUrl: a.fileUrl }))
+    : (b.receiptAttachment?.fileUrl ? [{ fileName: b.receiptAttachment.fileName || "", fileUrl: b.receiptAttachment.fileUrl }] : []),
   paymentProofAttachment: b.paymentProofAttachment || { fileName: "", fileUrl: "" },
   notes: b.notes || "",
   status: EXPENSE_STATUSES.includes(b.status) ? b.status : "pending",
