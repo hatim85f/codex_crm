@@ -123,6 +123,28 @@ router.put("/expenses/:id", canManage, async (req, res) => {
   }
 });
 
+// Partial update (e.g. inline rename of the vendor / entity from the overview).
+router.patch("/expenses/:id", canManage, async (req, res) => {
+  try {
+    const e = await Expense.findOne({ _id: req.params.id, organization: org(req), isDeleted: false });
+    if (!e) return res.status(404).json({ message: "Expense not found" });
+    const b = req.body || {};
+    const enums = { category: EXPENSE_CATEGORIES, businessLine: BUSINESS_LINES, status: EXPENSE_STATUSES, paymentMethod: PAYMENT_METHODS };
+    ["vendor", "title", "notes", "aedAmount", "originalAmount", "originalCurrency", "expenseDate", "category", "businessLine", "status", "paymentMethod"].forEach((f) => {
+      if (b[f] === undefined) return;
+      if (enums[f] && !enums[f].includes(b[f])) return;
+      e[f] = b[f];
+    });
+    e.updatedBy = req.user.id;
+    await e.save();
+    const out = await Expense.findById(e._id).populate("createdBy", "name avatar");
+    return res.json(out);
+  } catch (err) {
+    console.error("patch expense error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 router.delete("/expenses/:id", canManage, async (req, res) => {
   try {
     const e = await Expense.findOne({ _id: req.params.id, organization: org(req), isDeleted: false });

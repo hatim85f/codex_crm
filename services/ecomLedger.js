@@ -26,7 +26,10 @@ async function upsertOne(order, userId, kind, amount, extra) {
     ...extra,
   };
   if (exists) {
-    Object.assign(exists, base);
+    // Preserve a manually-edited vendor/entity across re-syncs.
+    const { vendor, ...rest } = base;
+    Object.assign(exists, rest);
+    if (!exists.vendor) exists.vendor = vendor;
     await exists.save();
   } else {
     const expenseNumber = (await Expense.countDocuments({ organization: order.organization })) + 1001;
