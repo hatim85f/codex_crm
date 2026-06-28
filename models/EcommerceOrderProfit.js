@@ -3,8 +3,8 @@ const { BUSINESS_LINES } = require("../services/accountingConstants");
 
 const { Schema } = mongoose;
 
-const AttachmentSchema = new Schema(
-  { fileName: { type: String, default: "" }, fileUrl: { type: String, required: true }, fileType: { type: String, default: "" } },
+const FileSchema = new Schema(
+  { fileName: { type: String, default: "" }, fileUrl: { type: String, required: true } },
   { _id: false }
 );
 
@@ -50,7 +50,9 @@ const EcommerceOrderProfitSchema = new Schema(
     profitMargin: { type: Number, default: 0 }, // %
 
     orderDate: { type: Date, default: Date.now, index: true },
-    attachments: { type: [AttachmentSchema], default: [] },
+    // Accounting trail: invoices the customer paid (income) + goods purchase receipts (cost).
+    customerInvoiceFiles: { type: [FileSchema], default: [] },
+    goodsReceiptFiles: { type: [FileSchema], default: [] },
     notes: { type: String, default: "" },
 
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null },

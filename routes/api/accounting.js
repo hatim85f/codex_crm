@@ -135,7 +135,8 @@ router.delete("/expenses/:id", canManage, async (req, res) => {
 const ecomFields = ["storeName", "orderNumber", "businessLine", "vendorSource",
   "customerPaidAmount", "currency", "aedAmount", "products",
   "shippingCost", "courierDeliveryCost", "packingHandlingCost",
-  "paymentGatewayFeePct", "shopifyFeePct", "orderDate", "attachments", "notes"];
+  "paymentGatewayFeePct", "shopifyFeePct", "orderDate", "notes",
+  "customerInvoiceFiles", "goodsReceiptFiles"];
 
 router.get("/ecommerce", async (req, res) => {
   try {
