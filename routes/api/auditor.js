@@ -6,7 +6,7 @@ const Expense = require("../../models/Expense");
 const BankStatement = require("../../models/BankStatement");
 const AuditItem = require("../../models/AuditItem");
 const { auth, requireRole } = require("../../middleware/auth");
-const { computePnl } = require("../../services/accountingReports");
+const { computePnl, auditAutoAvailability, applyAuditAuto } = require("../../services/accountingReports");
 
 // Read-only audit area. The auditor role is limited to THIS router only — it is
 // absent from every other route's role list, so it cannot reach CRM modules,
@@ -22,10 +22,10 @@ const org = (req) => req.user.organization;
 router.get("/audit", async (req, res) => {
   try {
     const period = String(req.query.period || new Date().getFullYear());
-    const items = await AuditItem.find({ organization: org(req), period }).sort({ createdAt: 1 });
-    const total = items.length;
-    const ready = items.filter((i) => ["ready", "shared_with_auditor"].includes(i.status)).length;
-    return res.json({ period, items, stats: { total, ready, shared: items.filter((i) => i.status === "shared_with_auditor").length } });
+    const rawItems = await AuditItem.find({ organization: org(req), period }).sort({ createdAt: 1 }).lean();
+    const auto = await auditAutoAvailability(org(req), period);
+    const { items, stats } = applyAuditAuto(rawItems, auto);
+    return res.json({ period, items, stats });
   } catch (err) { return res.status(500).json({ message: "Server error" }); }
 });
 

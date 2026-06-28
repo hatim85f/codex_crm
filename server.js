@@ -37,6 +37,11 @@ app.use("/api/customer-portal", require("./routes/api/customerPortalApprovals"))
 app.use("/api/customer-portal", require("./routes/api/customerPortalDeliveries"));
 app.use("/api/customer-portal", require("./routes/api/customerPortalComments"));
 app.use("/api/customer-portal", require("./routes/api/customerPortalSupport"));
+// Accounting + Auditor must ALSO be mounted before the broad "/api" routers below
+// (those run a router-level requireRole(INTERNAL) on every /api/* request, which
+// would otherwise reject the auditor/accountant before reaching these routes).
+app.use("/api/accounting", require("./routes/api/accounting"));
+app.use("/api/auditor", require("./routes/api/auditor"));
 app.use("/api", require("./routes/api/projectSteps"));
 app.use("/api", require("./routes/api/projectApprovals"));
 app.use("/api", require("./routes/api/projectDeliveries"));
@@ -52,9 +57,6 @@ app.use("/api/meta-leads", require("./routes/api/metaLeads"));
 app.use("/api/tasks", require("./routes/api/tasks"));
 // File Center / Document Center (internal-only)
 app.use("/api/files", require("./routes/api/files"));
-// Accounting (owner/admin/accountant) + read-only Auditor area
-app.use("/api/accounting", require("./routes/api/accounting"));
-app.use("/api/auditor", require("./routes/api/auditor"));
 
 const { startTaskReminderScheduler } = require("./services/taskReminders");
 

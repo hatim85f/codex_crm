@@ -1,13 +1,14 @@
 const express = require("express");
 
 const router = express.Router();
+const Invoice = require("../../models/Invoice");
 const Expense = require("../../models/Expense");
 const EcommerceOrderProfit = require("../../models/EcommerceOrderProfit");
 const PaymentGatewayUpload = require("../../models/PaymentGatewayUpload");
 const BankStatement = require("../../models/BankStatement");
 const AuditItem = require("../../models/AuditItem");
 const { auth, requireRole } = require("../../middleware/auth");
-const { computeOverview, computePnl } = require("../../services/accountingReports");
+const { computeOverview, computePnl, auditAutoAvailability, applyAuditAuto } = require("../../services/accountingReports");
 const {
   EXPENSE_CATEGORIES, EXPENSE_STATUSES, PAYMENT_METHODS, BUSINESS_LINES,
   GATEWAY_PROVIDERS, GATEWAY_STATUSES, BANK_STATEMENT_STATUSES, AUDIT_STATUSES, AUDIT_ITEMS,
@@ -314,18 +315,16 @@ async function ensureAuditItems(organization, period) {
   if (missing.length) {
     await AuditItem.insertMany(missing.map((i) => ({ organization, period, key: i.key, label: i.label, category: i.category })));
   }
-  return AuditItem.find({ organization, period }).sort({ createdAt: 1 });
+  return AuditItem.find({ organization, period }).sort({ createdAt: 1 }).lean();
 }
 
 router.get("/audit", async (req, res) => {
   try {
     const period = String(req.query.period || new Date().getFullYear());
-    const items = await ensureAuditItems(org(req), period);
-    const total = items.length;
-    const ready = items.filter((i) => ["ready", "shared_with_auditor"].includes(i.status)).length;
-    const missing = items.filter((i) => i.status === "missing").length;
-    const shared = items.filter((i) => i.status === "shared_with_auditor").length;
-    return res.json({ period, items, stats: { total, ready, missing, shared, health: total ? Math.round((ready / total) * 100) : 0 } });
+    const rawItems = await ensureAuditItems(org(req), period);
+    const auto = await auditAutoAvailability(org(req), period);
+    const { items, stats } = applyAuditAuto(rawItems, auto);
+    return res.json({ period, items, stats });
   } catch (err) {
     console.error("audit list error:", err.message);
     return res.status(500).json({ message: "Server error" });

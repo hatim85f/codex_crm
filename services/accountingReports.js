@@ -109,4 +109,39 @@ async function computePnl(organization, { from, to, businessLine } = {}) {
   };
 }
 
-module.exports = { computeOverview, computePnl };
+// Audit checklist items the system satisfies automatically from generated data.
+async function auditAutoAvailability(organization, period) {
+  const yr = Number(period);
+  const range = (yr && yr > 2000) ? { issueDate: { $gte: new Date(yr, 0, 1), $lt: new Date(yr + 1, 0, 1) } } : {};
+  const [invCount, paidCount] = await Promise.all([
+    Invoice.countDocuments({ organization, status: { $ne: "cancelled" }, ...range }),
+    Invoice.countDocuments({ organization, paidAmount: { $gt: 0 }, ...range }),
+  ]);
+  return {
+    sales_invoices: { available: invCount > 0, count: invCount, view: "invoices" },
+    payment_proofs: { available: paidCount > 0, count: paidCount, view: "payments" },
+    pnl_report: { available: true, count: null, view: "pnl" },
+  };
+}
+
+// Decorate audit items with auto-availability + return updated stats.
+function applyAuditAuto(rawItems, auto) {
+  const items = rawItems.map((i) => {
+    const a = auto[i.key];
+    return a ? { ...i, autoAvailable: a.available, autoCount: a.count, autoView: a.view } : i;
+  });
+  const isReady = (i) => i.autoAvailable || ["ready", "shared_with_auditor"].includes(i.status);
+  const total = items.length;
+  return {
+    items,
+    stats: {
+      total,
+      ready: items.filter(isReady).length,
+      missing: items.filter((i) => i.status === "missing" && !i.autoAvailable).length,
+      shared: items.filter((i) => i.status === "shared_with_auditor").length,
+      health: total ? Math.round((items.filter(isReady).length / total) * 100) : 0,
+    },
+  };
+}
+
+module.exports = { computeOverview, computePnl, auditAutoAvailability, applyAuditAuto };
