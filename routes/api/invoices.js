@@ -17,7 +17,7 @@ const { sendInvoicePortal } = require("../../services/emailService");
 const { requestWebBase } = require("../../services/publicWeb");
 const { nextDocumentNumber, nextInvoiceNumber, ensureManualNumberAvailable } = require("../../utils/documentNumbering");
 
-const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
+const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader", "accountant"];
 const MANAGE = ["owner_admin", "admin"];
 const STATUSES = ["draft", "sent", "partially_paid", "paid", "overdue", "cancelled", "pending_bank_verification"];
 const BODY_FIELDS = ["invoiceNumber", "customerId", "contactId", "quotationId", "status", "issueDate", "dueDate", "currency", "businessLine", "discountType", "discountValue", "paidAmount", "paymentMethod", "paymentTerms", "depositAmount", "paymentLink", "bankAccountId", "bankTransferReceipt", "notes", "terms", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];

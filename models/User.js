@@ -6,7 +6,7 @@ const { Schema } = mongoose;
 const ROLES = [
   "owner_admin", "admin", "sales", "marketing", "team_leader",
   "developer", "designer", "content_creator", "accountant", "support",
-  "customer",
+  "auditor", "customer",
 ];
 const USER_TYPES = ["internal", "customer"];
 const STATUSES = ["active", "inactive", "invited"];

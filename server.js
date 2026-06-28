@@ -52,6 +52,9 @@ app.use("/api/meta-leads", require("./routes/api/metaLeads"));
 app.use("/api/tasks", require("./routes/api/tasks"));
 // File Center / Document Center (internal-only)
 app.use("/api/files", require("./routes/api/files"));
+// Accounting (owner/admin/accountant) + read-only Auditor area
+app.use("/api/accounting", require("./routes/api/accounting"));
+app.use("/api/auditor", require("./routes/api/auditor"));
 
 const { startTaskReminderScheduler } = require("./services/taskReminders");
 

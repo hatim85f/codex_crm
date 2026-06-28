@@ -4,7 +4,7 @@ const router = express.Router();
 const BankAccount = require("../../models/BankAccount");
 const { auth, requireRole } = require("../../middleware/auth");
 
-const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
+const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader", "accountant"];
 const MANAGE = ["owner_admin", "admin"]; // manager/accountant level
 
 router.use(auth);
