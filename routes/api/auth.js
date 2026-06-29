@@ -235,11 +235,23 @@ router.patch("/my-quotations/:id/respond", auth, async (req, res) => {
     }
     await quotation.save();
 
+    // On acceptance, auto-create one invoice per payment slab and share to the portal.
+    let invoicesCreated = 0;
+    if (action === "accept") {
+      try {
+        const { createSlabInvoices } = require("../../services/quotationInvoicing");
+        const r = await createSlabInvoices(quotation, user._id);
+        invoicesCreated = r.created;
+      } catch (e) {
+        console.error("auto slab-invoice error:", e.message); // accept still succeeds
+      }
+    }
+
     logActivity({
       organization: user.organization,
       customerId: user.customerId,
       type: action === "accept" ? "quotation.accepted" : "quotation.rejected",
-      message: `${user.name} ${action === "accept" ? "accepted" : "rejected"} quotation ${quotation.quotationNumber}${action === "reject" && reason ? ` (${reason})` : ""}`,
+      message: `${user.name} ${action === "accept" ? "accepted" : "rejected"} quotation ${quotation.quotationNumber}${action === "reject" && reason ? ` (${reason})` : ""}${invoicesCreated ? ` — ${invoicesCreated} invoice(s) created` : ""}`,
       actorId: user._id,
       actorName: user.name,
     });

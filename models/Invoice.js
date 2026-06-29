@@ -74,6 +74,12 @@ const InvoiceSchema = new Schema(
     updatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     sentAt: { type: Date, default: null },
     paidAt: { type: Date, default: null },
+    // Generated payment receipt (created automatically when the invoice is paid).
+    receiptNumber: { type: String, default: "" },
+    receiptUrl: { type: String, default: "" },
+    receiptFiledAt: { type: Date, default: null },
+    // Slab provenance when auto-created from a quotation payment schedule.
+    quotationSlabIndex: { type: Number, default: null },
     history: { type: [HistorySchema], default: [] },
   },
   { timestamps: true }

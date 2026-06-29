@@ -63,6 +63,7 @@ const PaymentSlabSchema = new Schema(
   {
     label: { type: String, default: "", trim: true },
     percentage: { type: Number, default: 0, min: 0, max: 100 },
+    dueDate: { type: Date, default: null }, // agreed due date for this slab's invoice
   },
   { _id: false }
 );

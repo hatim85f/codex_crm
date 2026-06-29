@@ -367,6 +367,10 @@ router.patch("/:id/record-payment", requireRole(...MANAGE), async (req, res) => 
         title: "Invoice paid",
         message: `Invoice ${invoice.invoiceNumber} is fully paid`,
       });
+      try {
+        const { fileReceipt } = require("../../services/receipt");
+        await fileReceipt(invoice, { amount: invoice.paidAmount, method: invoice.paymentMethod, paidAt: invoice.paidAt, actorId: req.user.id });
+      } catch (e) { console.error("receipt generation error:", e.message); }
     }
     const out = await populateInvoice(Invoice.findById(invoice._id));
     return res.json(out);

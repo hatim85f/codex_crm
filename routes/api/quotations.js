@@ -38,6 +38,7 @@ function sanitizeSchedule(raw) {
     .map((s) => ({
       label: String((s && s.label) || "").trim(),
       percentage: Math.max(0, Math.min(100, Number((s && s.percentage)) || 0)),
+      dueDate: s && s.dueDate ? new Date(s.dueDate) : null,
     }))
     .filter((s) => s.label || s.percentage);
 }

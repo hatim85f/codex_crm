@@ -43,7 +43,13 @@ async function applyStripePayment(invoice, session) {
   invoice.paymentLink = "";
   invoice.history.push({ action: "invoice.payment_online", message: `Online payment received: ${amount}`, at: new Date() });
   await invoice.save();
-  if (invoice.status === "paid") await notifyInvoicePaid(invoice);
+  if (invoice.status === "paid") {
+    await notifyInvoicePaid(invoice);
+    try {
+      const { fileReceipt } = require("./receipt");
+      await fileReceipt(invoice, { amount: invoice.paidAmount, method: "online_payment", paidAt: invoice.paidAt });
+    } catch (e) { console.error("receipt generation error:", e.message); }
+  }
   return invoice;
 }
 

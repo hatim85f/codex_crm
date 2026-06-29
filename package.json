@@ -20,6 +20,7 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.19.2",
+    "pdfkit": "^0.19.1",
     "stripe": "^22.2.2"
   }
 }
