@@ -8,9 +8,12 @@ const TASK_TYPES = [
   "invoice_follow_up", "support_task", "general_task",
 ];
 const TASK_STATUSES = [
-  "todo", "in_progress", "waiting_customer", "waiting_internal",
-  "completed", "cancelled", "overdue",
+  "todo", "scheduled", "in_progress", "submitted_for_approval", "changes_requested",
+  "approved", "cancelled", "overdue",
+  // legacy (kept so older records still validate)
+  "waiting_customer", "waiting_internal", "completed",
 ];
+const APPROVAL_STATUSES = ["none", "pending", "approved", "changes_requested"];
 const PRIORITIES = ["low", "medium", "high", "urgent"];
 
 // Every CRM record a task can be linked to. "none" = a standalone manual task.
@@ -68,7 +71,18 @@ const TaskSchema = new Schema(
     status: { type: String, enum: TASK_STATUSES, default: "todo", index: true },
 
     dueDate: { type: Date, default: null, index: true },
+    scheduledDate: { type: Date, default: null, index: true }, // calendar planning slot (does NOT affect completion)
     reminderDate: { type: Date, default: null },
+
+    // Approval workflow — employees submit; the approver (project lead / admin) decides.
+    approvalStatus: { type: String, enum: APPROVAL_STATUSES, default: "none", index: true },
+    approverId: { type: Schema.Types.ObjectId, ref: "User", default: null }, // resolved on submit
+    submittedAt: { type: Date, default: null },
+    submittedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    completionNotes: { type: String, default: "" },
+    approvedAt: { type: Date, default: null },
+    approvedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    reviewComment: { type: String, default: "" },
 
     // Set when the reminder / overdue notification has been sent, so the
     // background sweep delivers each one exactly once. See services/taskReminders.js.
@@ -91,5 +105,6 @@ TaskSchema.index({ organization: 1, assignedTo: 1, status: 1 });
 module.exports = mongoose.model("Task", TaskSchema);
 module.exports.TASK_TYPES = TASK_TYPES;
 module.exports.TASK_STATUSES = TASK_STATUSES;
+module.exports.TASK_APPROVAL_STATUSES = APPROVAL_STATUSES;
 module.exports.TASK_PRIORITIES = PRIORITIES;
 module.exports.TASK_RELATED_MODULES = RELATED_MODULES;

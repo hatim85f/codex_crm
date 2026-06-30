@@ -4,6 +4,7 @@ const { Schema } = mongoose;
 
 const ACTIVITY_TYPES = [
   "created", "comment", "status_change", "reassigned",
+  "scheduled", "started", "submitted_for_approval", "approved", "changes_requested",
   "rescheduled", "attachment", "completed", "cancelled",
 ];
 
