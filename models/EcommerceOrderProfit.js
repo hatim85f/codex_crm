@@ -25,6 +25,7 @@ const OrderLineSchema = new Schema(
     aedAmount: { type: Number, default: 0 }, // revenue in AED for this order
     sellerTracking: { type: String, default: "" }, // vendor/seller tracking (eBay, etc.)
     aramexTracking: { type: String, default: "" }, // Aramex / Shop & Ship last-mile tracking
+    operatingExpenseShare: { type: Number, default: 0 }, // this order's slice of monthly operating costs (set by opex allocation)
     products: { type: [ProductSchema], default: [] },
     customerInvoiceFiles: { type: [FileSchema], default: [] },
     // Computed per order
@@ -35,12 +36,6 @@ const OrderLineSchema = new Schema(
     profit: { type: Number, default: 0 },
     margin: { type: Number, default: 0 }, // %
   },
-  { _id: false }
-);
-
-// A free-form shared cost line (employee salary, packing materials, etc.).
-const ExpenseLineSchema = new Schema(
-  { label: { type: String, default: "" }, amount: { type: Number, default: 0 } },
   { _id: false }
 );
 
@@ -64,9 +59,7 @@ const EcommerceOrderProfitSchema = new Schema(
     productBuyingCost: { type: Number, default: 0 }, // computed = sum of every order's product costs
     shippingCost: { type: Number, default: 0 }, // vendor shipping (any method)
     courierDeliveryCost: { type: Number, default: 0 }, // last-mile to customer
-    packingHandlingCost: { type: Number, default: 0 }, // legacy single field (kept for old records)
-    // Free-form shared expenses entered manually (employee salary, packing, etc.).
-    extraExpenses: { type: [ExpenseLineSchema], default: [] },
+    packingHandlingCost: { type: Number, default: 0 },
 
     // Percentage fees of revenue
     paymentGatewayFeePct: { type: Number, default: 0 }, // % of revenue
@@ -75,6 +68,7 @@ const EcommerceOrderProfitSchema = new Schema(
     shopifyFee: { type: Number, default: 0 }, // computed AED
 
     // Computed (set on save)
+    operatingExpenseTotal: { type: Number, default: 0 }, // sum of orders' monthly-opex shares
     totalCost: { type: Number, default: 0 },
     netProfit: { type: Number, default: 0 },
     profitMargin: { type: Number, default: 0 }, // %
@@ -96,8 +90,7 @@ const pct1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 EcommerceOrderProfitSchema.pre("save", function computeProfit(next) {
   const orders = this.orders || [];
   const totalRevenue = round(orders.reduce((s, o) => s + (Number(o.aedAmount) || 0), 0));
-  const extraExpensesTotal = (this.extraExpenses || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
-  const shared = (Number(this.shippingCost) || 0) + (Number(this.courierDeliveryCost) || 0) + (Number(this.packingHandlingCost) || 0) + extraExpensesTotal;
+  const shared = (Number(this.shippingCost) || 0) + (Number(this.courierDeliveryCost) || 0) + (Number(this.packingHandlingCost) || 0);
   const feePct = (Number(this.paymentGatewayFeePct) || 0) + (Number(this.shopifyFeePct) || 0);
 
   // Batch date = earliest order date.
@@ -110,17 +103,19 @@ EcommerceOrderProfitSchema.pre("save", function computeProfit(next) {
     o.productCost = round((o.products || []).reduce((s, p) => s + (Number(p.quantity) || 1) * (Number(p.cost) || 0), 0));
     o.allocatedCost = round(totalRevenue > 0 ? shared * (rev / totalRevenue) : (orders.length ? shared / orders.length : 0));
     o.feeCost = round(rev * feePct / 100);
-    o.totalCost = round(o.productCost + o.allocatedCost + o.feeCost);
+    o.totalCost = round(o.productCost + o.allocatedCost + o.feeCost + (Number(o.operatingExpenseShare) || 0));
     o.profit = round(rev - o.totalCost);
     o.margin = rev > 0 ? pct1((o.profit / rev) * 100) : 0;
   });
 
+  const opexTotal = round(orders.reduce((s, o) => s + (Number(o.operatingExpenseShare) || 0), 0));
+  this.operatingExpenseTotal = opexTotal;
   this.aedAmount = totalRevenue;
   this.customerPaidAmount = round(orders.reduce((s, o) => s + (Number(o.customerPaidAmount) || 0), 0));
   this.productBuyingCost = round(orders.reduce((s, o) => s + o.productCost, 0));
   this.paymentGatewayFee = round(totalRevenue * (Number(this.paymentGatewayFeePct) || 0) / 100);
   this.shopifyFee = round(totalRevenue * (Number(this.shopifyFeePct) || 0) / 100);
-  const costs = this.productBuyingCost + shared + this.paymentGatewayFee + this.shopifyFee;
+  const costs = this.productBuyingCost + shared + this.paymentGatewayFee + this.shopifyFee + opexTotal;
   this.totalCost = round(costs);
   this.netProfit = round(totalRevenue - costs);
   this.profitMargin = totalRevenue > 0 ? pct1((this.netProfit / totalRevenue) * 100) : 0;

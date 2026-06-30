@@ -4,12 +4,14 @@ const router = express.Router();
 const Invoice = require("../../models/Invoice");
 const Expense = require("../../models/Expense");
 const EcommerceOrderProfit = require("../../models/EcommerceOrderProfit");
+const EcomOperatingExpense = require("../../models/EcomOperatingExpense");
 const PaymentGatewayUpload = require("../../models/PaymentGatewayUpload");
 const BankStatement = require("../../models/BankStatement");
 const AuditItem = require("../../models/AuditItem");
 const { auth, requireRole } = require("../../middleware/auth");
 const { computeOverview, computePnl, auditAutoAvailability, applyAuditAuto } = require("../../services/accountingReports");
 const { syncOrderExpenses, removeOrderExpenses } = require("../../services/ecomLedger");
+const { recalcForBatch, recalcMonthlyOpex, monthsForBatch } = require("../../services/opexAllocation");
 const {
   EXPENSE_CATEGORIES, EXPENSE_STATUSES, PAYMENT_METHODS, BUSINESS_LINES,
   GATEWAY_PROVIDERS, GATEWAY_STATUSES, BANK_STATEMENT_STATUSES, AUDIT_STATUSES, AUDIT_ITEMS,
@@ -156,7 +158,7 @@ router.delete("/expenses/:id", canManage, async (req, res) => {
 
 // ---------------- eCommerce order profit ----------------
 const ecomFields = ["storeName", "businessLine", "vendorSource", "orders",
-  "shippingCost", "courierDeliveryCost", "packingHandlingCost", "extraExpenses",
+  "shippingCost", "courierDeliveryCost", "packingHandlingCost",
   "paymentGatewayFeePct", "shopifyFeePct", "orderDate", "notes", "goodsReceiptFiles"];
 
 router.get("/ecommerce", async (req, res) => {
@@ -177,8 +179,10 @@ router.post("/ecommerce", canManage, async (req, res) => {
     ecomFields.forEach((f) => { if (b[f] !== undefined) doc[f] = b[f]; });
     if (!BUSINESS_LINES.includes(doc.businessLine)) doc.businessLine = "own_ecommerce_dropshipping";
     await doc.save(); // pre-save computes totalCost/netProfit/profitMargin
-    await syncOrderExpenses(doc, req.user.id); // post COGS + fees to Expenses
-    return res.status(201).json(doc);
+    await recalcForBatch(org(req), doc); // distribute month's operating expenses across orders
+    const fresh = await EcommerceOrderProfit.findById(doc._id);
+    await syncOrderExpenses(fresh, req.user.id); // post COGS + fees to Expenses
+    return res.status(201).json(fresh);
   } catch (err) {
     console.error("create ecom error:", err.message);
     return res.status(500).json({ message: "Server error" });
@@ -201,8 +205,10 @@ router.put("/ecommerce/:id", canManage, async (req, res) => {
     ecomFields.forEach((f) => { if (b[f] !== undefined) d[f] = b[f]; });
     d.updatedBy = req.user.id;
     await d.save();
-    await syncOrderExpenses(d, req.user.id); // keep linked Expenses in sync
-    return res.json(d);
+    await recalcForBatch(org(req), d); // re-distribute month's operating expenses
+    const fresh = await EcommerceOrderProfit.findById(d._id);
+    await syncOrderExpenses(fresh, req.user.id); // keep linked Expenses in sync
+    return res.json(fresh);
   } catch (err) {
     console.error("update ecom error:", err.message);
     return res.status(500).json({ message: "Server error" });
@@ -213,8 +219,69 @@ router.delete("/ecommerce/:id", canManage, async (req, res) => {
   try {
     const d = await EcommerceOrderProfit.findOne({ _id: req.params.id, organization: org(req), isDeleted: false });
     if (!d) return res.status(404).json({ message: "Record not found" });
+    const months = monthsForBatch(d); // capture before delete — orders leave the month
     d.isDeleted = true; d.updatedBy = req.user.id; await d.save();
     await removeOrderExpenses(org(req), d._id); // remove the linked Expenses
+    for (const m of months) await recalcMonthlyOpex(org(req), m.year, m.month); // re-spread remaining orders' share
+    return res.json({ ok: true, _id: d._id });
+  } catch (err) { return res.status(500).json({ message: "Server error" }); }
+});
+
+// ---------------- eCommerce monthly operating expenses ----------------
+// Entered once per month; divided equally across that month's orders.
+router.get("/ecommerce-operating-expenses", async (req, res) => {
+  try {
+    const q = { organization: org(req), isDeleted: false };
+    if (req.query.year) q.periodYear = Number(req.query.year);
+    if (req.query.month) q.periodMonth = Number(req.query.month);
+    const items = await EcomOperatingExpense.find(q).sort({ periodYear: -1, periodMonth: -1, createdAt: 1 });
+    return res.json(items);
+  } catch (err) { return res.status(500).json({ message: "Server error" }); }
+});
+
+router.post("/ecommerce-operating-expenses", canManage, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const year = Number(b.periodYear), month = Number(b.periodMonth);
+    if (!b.label || !year || !(month >= 1 && month <= 12)) return res.status(400).json({ message: "Label, year and month (1-12) are required" });
+    const doc = await EcomOperatingExpense.create({
+      organization: org(req), periodYear: year, periodMonth: month,
+      label: b.label, amount: Number(b.amount) || 0, notes: b.notes || "",
+      createdBy: req.user.id, updatedBy: req.user.id,
+    });
+    await recalcMonthlyOpex(org(req), year, month);
+    return res.status(201).json(doc);
+  } catch (err) {
+    console.error("create opex error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.put("/ecommerce-operating-expenses/:id", canManage, async (req, res) => {
+  try {
+    const d = await EcomOperatingExpense.findOne({ _id: req.params.id, organization: org(req), isDeleted: false });
+    if (!d) return res.status(404).json({ message: "Record not found" });
+    const b = req.body || {};
+    const oldY = d.periodYear, oldM = d.periodMonth;
+    if (b.label !== undefined) d.label = b.label;
+    if (b.amount !== undefined) d.amount = Number(b.amount) || 0;
+    if (b.notes !== undefined) d.notes = b.notes;
+    if (b.periodYear !== undefined) d.periodYear = Number(b.periodYear);
+    if (b.periodMonth !== undefined) d.periodMonth = Number(b.periodMonth);
+    d.updatedBy = req.user.id;
+    await d.save();
+    await recalcMonthlyOpex(org(req), oldY, oldM);
+    if (d.periodYear !== oldY || d.periodMonth !== oldM) await recalcMonthlyOpex(org(req), d.periodYear, d.periodMonth);
+    return res.json(d);
+  } catch (err) { return res.status(500).json({ message: "Server error" }); }
+});
+
+router.delete("/ecommerce-operating-expenses/:id", canManage, async (req, res) => {
+  try {
+    const d = await EcomOperatingExpense.findOne({ _id: req.params.id, organization: org(req), isDeleted: false });
+    if (!d) return res.status(404).json({ message: "Record not found" });
+    d.isDeleted = true; d.updatedBy = req.user.id; await d.save();
+    await recalcMonthlyOpex(org(req), d.periodYear, d.periodMonth);
     return res.json({ ok: true, _id: d._id });
   } catch (err) { return res.status(500).json({ message: "Server error" }); }
 });
