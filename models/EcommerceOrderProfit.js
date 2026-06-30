@@ -90,7 +90,10 @@ const pct1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 EcommerceOrderProfitSchema.pre("save", function computeProfit(next) {
   const orders = this.orders || [];
   const totalRevenue = round(orders.reduce((s, o) => s + (Number(o.aedAmount) || 0), 0));
-  const shared = (Number(this.shippingCost) || 0) + (Number(this.courierDeliveryCost) || 0) + (Number(this.packingHandlingCost) || 0);
+  // Legacy packing/handling is no longer a per-batch cost (moved to monthly
+  // operating costs) — neutralize any stored value so it stops reducing profit.
+  this.packingHandlingCost = 0;
+  const shared = (Number(this.shippingCost) || 0) + (Number(this.courierDeliveryCost) || 0);
   const feePct = (Number(this.paymentGatewayFeePct) || 0) + (Number(this.shopifyFeePct) || 0);
 
   // Batch date = earliest order date.

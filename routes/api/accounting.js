@@ -227,6 +227,22 @@ router.delete("/ecommerce/:id", canManage, async (req, res) => {
   } catch (err) { return res.status(500).json({ message: "Server error" }); }
 });
 
+// Recompute every batch's profit (re-saves to clear legacy packing/handling and
+// re-apply monthly operating-expense shares) + re-sync the Expense ledger.
+router.post("/ecommerce/recalculate", canManage, async (req, res) => {
+  try {
+    const all = await EcommerceOrderProfit.find({ organization: org(req), isDeleted: false });
+    for (const b of all) { await b.save(); await syncOrderExpenses(b, req.user.id); }
+    const months = new Map();
+    all.forEach((b) => monthsForBatch(b).forEach((m) => months.set(`${m.year}-${m.month}`, m)));
+    for (const m of months.values()) await recalcMonthlyOpex(org(req), m.year, m.month);
+    return res.json({ ok: true, batches: all.length });
+  } catch (err) {
+    console.error("recalc ecom error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 // ---------------- eCommerce monthly operating expenses ----------------
 // Entered once per month; divided equally across that month's orders.
 router.get("/ecommerce-operating-expenses", async (req, res) => {

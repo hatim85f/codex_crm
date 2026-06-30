@@ -52,15 +52,13 @@ async function recalcMonthlyOpex(organization, year, month) {
 
   const perOrder = count > 0 ? round(opexTotal / count) : 0;
 
-  // Apply the share to in-month orders and re-save (pre-save folds it into profit).
+  // Apply the share to in-month orders and re-save (pre-save folds it into
+  // profit and also clears any legacy packing/handling on the batch).
   for (const b of batches) {
-    let changed = false;
     (b.orders || []).forEach((o) => {
-      if (o.orderDate && o.orderDate >= start && o.orderDate < end) {
-        if (round(o.operatingExpenseShare) !== perOrder) { o.operatingExpenseShare = perOrder; changed = true; }
-      }
+      if (o.orderDate && o.orderDate >= start && o.orderDate < end) o.operatingExpenseShare = perOrder;
     });
-    if (changed) await b.save();
+    await b.save();
   }
 
   return { opexTotal, count, perOrder };

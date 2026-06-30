@@ -41,7 +41,7 @@ async function upsertOne(order, userId, kind, amount, extra) {
 async function syncOrderExpenses(order, userId) {
   const orders = order.orders || [];
   const label = `${order.storeName}${orders.length > 1 ? ` (${orders.length} orders)` : orders[0]?.orderNumber ? ` ${orders[0].orderNumber}` : ""}`.trim();
-  const cogs = round((order.productBuyingCost || 0) + (order.shippingCost || 0) + (order.courierDeliveryCost || 0) + (order.packingHandlingCost || 0));
+  const cogs = round((order.productBuyingCost || 0) + (order.shippingCost || 0) + (order.courierDeliveryCost || 0));
   const fees = round((order.paymentGatewayFee || 0) + (order.shopifyFee || 0));
   await upsertOne(order, userId, "cogs", cogs, {
     title: `COGS — ${label}`,
