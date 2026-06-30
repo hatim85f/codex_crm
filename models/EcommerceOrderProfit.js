@@ -23,6 +23,8 @@ const OrderLineSchema = new Schema(
     customerPaidAmount: { type: Number, default: 0 },
     currency: { type: String, default: "AED" },
     aedAmount: { type: Number, default: 0 }, // revenue in AED for this order
+    sellerTracking: { type: String, default: "" }, // vendor/seller tracking (eBay, etc.)
+    aramexTracking: { type: String, default: "" }, // Aramex / Shop & Ship last-mile tracking
     products: { type: [ProductSchema], default: [] },
     customerInvoiceFiles: { type: [FileSchema], default: [] },
     // Computed per order
@@ -33,6 +35,12 @@ const OrderLineSchema = new Schema(
     profit: { type: Number, default: 0 },
     margin: { type: Number, default: 0 }, // %
   },
+  { _id: false }
+);
+
+// A free-form shared cost line (employee salary, packing materials, etc.).
+const ExpenseLineSchema = new Schema(
+  { label: { type: String, default: "" }, amount: { type: Number, default: 0 } },
   { _id: false }
 );
 
@@ -56,7 +64,9 @@ const EcommerceOrderProfitSchema = new Schema(
     productBuyingCost: { type: Number, default: 0 }, // computed = sum of every order's product costs
     shippingCost: { type: Number, default: 0 }, // vendor shipping (any method)
     courierDeliveryCost: { type: Number, default: 0 }, // last-mile to customer
-    packingHandlingCost: { type: Number, default: 0 },
+    packingHandlingCost: { type: Number, default: 0 }, // legacy single field (kept for old records)
+    // Free-form shared expenses entered manually (employee salary, packing, etc.).
+    extraExpenses: { type: [ExpenseLineSchema], default: [] },
 
     // Percentage fees of revenue
     paymentGatewayFeePct: { type: Number, default: 0 }, // % of revenue
@@ -86,7 +96,8 @@ const pct1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 EcommerceOrderProfitSchema.pre("save", function computeProfit(next) {
   const orders = this.orders || [];
   const totalRevenue = round(orders.reduce((s, o) => s + (Number(o.aedAmount) || 0), 0));
-  const shared = (Number(this.shippingCost) || 0) + (Number(this.courierDeliveryCost) || 0) + (Number(this.packingHandlingCost) || 0);
+  const extraExpensesTotal = (this.extraExpenses || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const shared = (Number(this.shippingCost) || 0) + (Number(this.courierDeliveryCost) || 0) + (Number(this.packingHandlingCost) || 0) + extraExpensesTotal;
   const feePct = (Number(this.paymentGatewayFeePct) || 0) + (Number(this.shopifyFeePct) || 0);
 
   // Batch date = earliest order date.
