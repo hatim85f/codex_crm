@@ -3,10 +3,12 @@
 // orders, ambiguous items) is deliberately left for the Claude review pass:
 // see PendingReceipt / open flags in JANMARINI_FULFILLMENT.md.
 const ShopifyOrder = require("../models/janmarini/ShopifyOrder");
+const Purchase = require("../models/janmarini/Purchase");
 const InboundShipment = require("../models/janmarini/InboundShipment");
 const PendingReceipt = require("../models/janmarini/PendingReceipt");
 const { fetchUnseenReceipts, getConfiguredMailboxes } = require("./janmariniMailbox");
 const { getShopifyAccessToken } = require("./shopifyAuth");
+const { syncCrmProfitRecords } = require("./janmariniCrmSync");
 
 const IGNORED_ORDER_NUMBERS = ["#1760", "#1761", "#1762"];
 
@@ -27,6 +29,8 @@ const ORDERS_QUERY = `
           phone
           customer { firstName lastName }
           totalPriceSet { shopMoney { amount currencyCode } }
+          displayFulfillmentStatus
+          fulfillments(first: 5) { createdAt }
           lineItems(first: 50) {
             edges {
               node {
@@ -57,6 +61,7 @@ async function syncShopifyOrders() {
   }
 
   let synced = 0;
+  let reconciledFulfilled = 0;
   let cursor = null;
   let hasNextPage = true;
 
@@ -77,32 +82,43 @@ async function syncShopifyOrders() {
     for (const { node: o } of edges) {
       const orderNumber = o.name; // already "#1750"-style
       const money = o.totalPriceSet?.shopMoney;
-      await ShopifyOrder.findOneAndUpdate(
-        { shopifyOrderId: o.id },
-        {
-          shopifyOrderId: o.id,
-          orderNumber,
-          customerName: [o.customer?.firstName, o.customer?.lastName].filter(Boolean).join(" "),
-          customerPhone: o.phone || "",
-          orderDate: o.createdAt ? new Date(o.createdAt) : null,
-          totalPrice: Number(money?.amount) || 0,
-          currency: money?.currencyCode || "AED",
-          ignored: IGNORED_ORDER_NUMBERS.includes(orderNumber),
-          items: o.lineItems.edges.map(({ node: li }) => ({
-            name: li.name,
-            quantity: li.quantity,
-            image: li.image?.url || "",
-          })),
-        },
-        { upsert: true, new: true }
-      );
+      const existing = await ShopifyOrder.findOne({ shopifyOrderId: o.id }).select("fulfilled");
+      // Reconciliation safety net: the webhook usually flips `fulfilled` the moment
+      // an order is fulfilled in Shopify, but this catches it too if the webhook
+      // was missed/down — either path moves the order into the app's History tab.
+      const shopifyFulfilled = o.displayFulfillmentStatus === "FULFILLED";
+      const newlyFulfilled = shopifyFulfilled && !existing?.fulfilled;
+      const update = {
+        shopifyOrderId: o.id,
+        orderNumber,
+        customerName: [o.customer?.firstName, o.customer?.lastName].filter(Boolean).join(" "),
+        customerPhone: o.phone || "",
+        orderDate: o.createdAt ? new Date(o.createdAt) : null,
+        totalPrice: Number(money?.amount) || 0,
+        currency: money?.currencyCode || "AED",
+        ignored: IGNORED_ORDER_NUMBERS.includes(orderNumber),
+        items: o.lineItems.edges.map(({ node: li }) => ({
+          name: li.name,
+          quantity: li.quantity,
+          image: li.image?.url || "",
+        })),
+      };
+      if (shopifyFulfilled) {
+        update.fulfilled = true;
+        update.fulfilledAt = existing?.fulfilled ? undefined : new Date(o.fulfillments?.[0]?.createdAt || Date.now());
+      }
+      await ShopifyOrder.findOneAndUpdate({ shopifyOrderId: o.id }, update, { upsert: true, new: true });
+      if (newlyFulfilled) {
+        await Purchase.updateMany({ orderNumber }, { status: "delivered" });
+        reconciledFulfilled += 1;
+      }
       synced += 1;
     }
     hasNextPage = pageInfo.hasNextPage;
     cursor = edges[edges.length - 1]?.cursor || null;
   }
 
-  return { synced, skipped: false };
+  return { synced, reconciledFulfilled, skipped: false };
 }
 
 // Stages new mail from every configured inbox (mariniorders, eBay via Gmail,
@@ -145,7 +161,8 @@ async function runDailySync() {
   const shopify = await syncShopifyOrders().catch((e) => ({ error: e.message }));
   const mailbox = await syncMailboxReceipts().catch((e) => ({ error: e.message }));
   const aramex = await syncAramexTracking().catch((e) => ({ error: e.message }));
-  return { shopify, mailbox, aramex };
+  const crm = await syncCrmProfitRecords().catch((e) => ({ error: e.message }));
+  return { shopify, mailbox, aramex, crm };
 }
 
 module.exports = { runDailySync, syncShopifyOrders, syncMailboxReceipts, syncAramexTracking };

@@ -19,8 +19,14 @@ const PendingReceiptSchema = new Schema(
     receivedAt: { type: Date, default: null },
     bodyText: { type: String, default: "" },
     attachments: { type: [AttachmentSchema], default: [] },
-    status: { type: String, enum: ["pending", "processed", "ignored"], default: "pending", index: true },
+    status: { type: String, enum: ["pending", "processed", "needs_review", "ignored"], default: "pending", index: true },
     matchedPurchase: { type: Schema.Types.ObjectId, ref: "Purchase", default: null },
+    // Set by the automatic AI parsing pass (services/janmariniReceiptParser.js).
+    // Kept for audit — lets a human see exactly what the model read and why it
+    // did/didn't apply the result automatically.
+    aiConfidence: { type: String, enum: ["", "high", "low"], default: "" },
+    aiNotes: { type: String, default: "" },
+    aiParsed: { type: Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );
