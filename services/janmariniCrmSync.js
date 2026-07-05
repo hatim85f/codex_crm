@@ -28,6 +28,7 @@
 const ShopifyOrder = require("../models/janmarini/ShopifyOrder");
 const Purchase = require("../models/janmarini/Purchase");
 const EcommerceOrderProfit = require("../models/EcommerceOrderProfit");
+const { ensureOrderInvoice } = require("./janmariniInvoice");
 
 const ORGANIZATION_ID = "6a308a0ff2cebbca8453bc2c"; // Codex FZE Technology
 const STORE_NAME = "Janmarini";
@@ -39,7 +40,7 @@ const AED_PER_USD = 3.8;
 const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const digitsOnly = (s) => (s || "").replace(/\D/g, "").replace(/^0+/, "");
 
-function buildOrderLine(order, itemsForOrder) {
+async function buildOrderLine(order, itemsForOrder, dryRun) {
   const products = itemsForOrder.map((p) => ({
     name: p.itemName,
     quantity: p.quantity || 1,
@@ -48,6 +49,23 @@ function buildOrderLine(order, itemsForOrder) {
   const aramexTracking = [...new Set(itemsForOrder.map((p) => p.inboundShipment?.snsShipmentNumber).filter(Boolean))].join(", ");
   const sellerTracking = [...new Set(itemsForOrder.map((p) => p.sellerTracking).filter(Boolean))].join(", ");
   const revenue = Number(order.totalPrice) || 0;
+
+  // ensureOrderInvoice uploads a real file and writes to the DB — never call
+  // it during a dry run, which must have zero side effects.
+  let customerInvoiceFiles = [];
+  if (dryRun) {
+    customerInvoiceFiles = order.invoiceUrl
+      ? [{ fileName: `Invoice ${order.orderNumber}`, fileUrl: order.invoiceUrl }]
+      : [{ fileName: `Invoice ${order.orderNumber}`, fileUrl: "(would be generated)" }];
+  } else {
+    try {
+      const invoiceUrl = await ensureOrderInvoice(order);
+      customerInvoiceFiles = [{ fileName: `Invoice ${order.orderNumber}`, fileUrl: invoiceUrl }];
+    } catch (e) {
+      console.warn(`[janmarini] Could not generate invoice for ${order.orderNumber}: ${e.message}`);
+    }
+  }
+
   return {
     orderNumber: order.orderNumber,
     orderDate: order.orderDate,
@@ -57,6 +75,7 @@ function buildOrderLine(order, itemsForOrder) {
     sellerTracking,
     aramexTracking,
     products,
+    customerInvoiceFiles,
   };
 }
 
@@ -116,8 +135,10 @@ async function syncCrmProfitRecords({ dryRun = false } = {}) {
       continue;
     }
 
-    const orderLines = shopifyOrdersInBatch.map((order) =>
-      buildOrderLine(order, batchPurchases.filter((p) => p.orderNumber === order.orderNumber))
+    const orderLines = await Promise.all(
+      shopifyOrdersInBatch.map((order) =>
+        buildOrderLine(order, batchPurchases.filter((p) => p.orderNumber === order.orderNumber), dryRun)
+      )
     );
 
     // Shared batch-level cost: shipping fees, deduped by shipment (several

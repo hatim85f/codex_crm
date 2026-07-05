@@ -27,7 +27,9 @@ const ORDERS_QUERY = `
           name
           createdAt
           phone
+          email
           customer { firstName lastName }
+          shippingAddress { address1 address2 city country }
           totalPriceSet { shopMoney { amount currencyCode } }
           displayFulfillmentStatus
           fulfillments(first: 5) { createdAt }
@@ -37,6 +39,7 @@ const ORDERS_QUERY = `
                 name
                 quantity
                 image { url }
+                originalUnitPriceSet { shopMoney { amount } }
               }
             }
           }
@@ -93,6 +96,13 @@ async function syncShopifyOrders() {
         orderNumber,
         customerName: [o.customer?.firstName, o.customer?.lastName].filter(Boolean).join(" "),
         customerPhone: o.phone || "",
+        customerEmail: o.email || "",
+        shippingAddress: {
+          address1: o.shippingAddress?.address1 || "",
+          address2: o.shippingAddress?.address2 || "",
+          city: o.shippingAddress?.city || "",
+          country: o.shippingAddress?.country || "",
+        },
         orderDate: o.createdAt ? new Date(o.createdAt) : null,
         totalPrice: Number(money?.amount) || 0,
         currency: money?.currencyCode || "AED",
@@ -101,6 +111,7 @@ async function syncShopifyOrders() {
           name: li.name,
           quantity: li.quantity,
           image: li.image?.url || "",
+          price: Number(li.originalUnitPriceSet?.shopMoney?.amount) || 0,
         })),
       };
       if (shopifyFulfilled) {
