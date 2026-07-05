@@ -18,6 +18,15 @@ const { fulfillShopifyOrder } = require("../../services/shopifyFulfillment");
 
 const getEmployeeSecret = () => process.env.JANMARINI_JWT_SECRET || "janmarini-dev-secret-change-me";
 
+// Matches Codex CRM's own EcommerceOrderProfit accounting convention (fixed
+// for now, per Hatim) — same 3% payment gateway + 2.9% Shopify fee on
+// revenue, plus a flat AED 30/order last-mile delivery cost, so the owner
+// dashboard's profit figure lines up with CRM instead of understating cost.
+const PAYMENT_GATEWAY_FEE_PCT = 3;
+const SHOPIFY_FEE_PCT = 2.9;
+const DELIVERY_FEE_AED = 30;
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 // ---- Employee auth ---------------------------------------------------------
 
 function employeeAuth(req, res, next) {
@@ -199,15 +208,8 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
       byOrderNumber.get(p.orderNumber).push(p);
     }
 
-    const view = orders.map((o) => ({
-      orderNumber: o.orderNumber,
-      customerName: o.customerName,
-      customerPhone: o.customerPhone,
-      orderDate: o.orderDate,
-      totalPrice: o.totalPrice,
-      currency: o.currency,
-      fulfilled: !!o.fulfilled,
-      items: o.items.map((item) => {
+    const view = orders.map((o) => {
+      const items = o.items.map((item) => {
         const match = (byOrderNumber.get(o.orderNumber) || []).find(
           (p) => p.itemName.toLowerCase() === item.name.toLowerCase()
         );
@@ -227,8 +229,35 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
           flagNote: match?.flagNote || "",
           etaNote: match ? etaNote(match, true) : `Expected ${formatDate(addDays(o.orderDate || new Date(), 10))} - ${formatDate(addDays(o.orderDate || new Date(), 12))}`,
         };
-      }),
-    }));
+      });
+
+      const revenue = Number(o.totalPrice) || 0;
+      const totalCostAED = round2(items.reduce((s, i) => s + (i.costAED || 0), 0));
+      const totalShippingFeesAED = round2(items.reduce((s, i) => s + (i.shippingFeesAED || 0), 0));
+      const paymentGatewayFeeAED = round2(revenue * (PAYMENT_GATEWAY_FEE_PCT / 100));
+      const shopifyFeeAED = round2(revenue * (SHOPIFY_FEE_PCT / 100));
+      const deliveryFeeAED = DELIVERY_FEE_AED;
+      const profit = round2(
+        revenue - totalCostAED - totalShippingFeesAED - paymentGatewayFeeAED - shopifyFeeAED - deliveryFeeAED
+      );
+
+      return {
+        orderNumber: o.orderNumber,
+        customerName: o.customerName,
+        customerPhone: o.customerPhone,
+        orderDate: o.orderDate,
+        totalPrice: o.totalPrice,
+        currency: o.currency,
+        fulfilled: !!o.fulfilled,
+        totalCostAED,
+        totalShippingFeesAED,
+        paymentGatewayFeeAED,
+        shopifyFeeAED,
+        deliveryFeeAED,
+        profit,
+        items,
+      };
+    });
 
     res.json(view);
   } catch (e) {
