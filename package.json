@@ -18,7 +18,9 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "imapflow": "^1.4.3",
     "jsonwebtoken": "^9.0.3",
+    "mailparser": "^3.9.12",
     "mongoose": "^8.19.2",
     "pdfkit": "^0.19.1",
     "stripe": "^22.2.2"

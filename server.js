@@ -11,6 +11,7 @@ app.use(cors());
 // Stripe & Meta webhooks need the raw request body for signature verification — mount before json.
 app.use("/api/stripe", require("./routes/api/stripe"));
 app.use("/api/meta", require("./routes/api/meta"));
+app.use("/api/janmarini-webhooks", require("./routes/api/janmariniWebhooks"));
 app.use(express.json());
 
 connectDB();
@@ -42,6 +43,10 @@ app.use("/api/customer-portal", require("./routes/api/customerPortalSupport"));
 // would otherwise reject the auditor/accountant before reaching these routes).
 app.use("/api/accounting", require("./routes/api/accounting"));
 app.use("/api/auditor", require("./routes/api/auditor"));
+// Janmarini Fulfillment Tracker must ALSO be mounted before the broad "/api" routers
+// below (unconditional `auth` middleware there would otherwise reject its PIN-based
+// employee login and admin-key requests, which use their own separate auth).
+app.use("/api/janmarini", require("./routes/api/janmarini"));
 app.use("/api", require("./routes/api/projectSteps"));
 app.use("/api", require("./routes/api/projectApprovals"));
 app.use("/api", require("./routes/api/projectDeliveries"));
