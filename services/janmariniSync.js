@@ -9,6 +9,7 @@ const PendingReceipt = require("../models/janmarini/PendingReceipt");
 const { fetchUnseenReceipts, getConfiguredMailboxes } = require("./janmariniMailbox");
 const { getShopifyAccessToken } = require("./shopifyAuth");
 const { syncCrmProfitRecords } = require("./janmariniCrmSync");
+const { processPendingReceipts } = require("./janmariniReceiptParser");
 
 const IGNORED_ORDER_NUMBERS = ["#1760", "#1761", "#1762"];
 
@@ -133,7 +134,13 @@ async function syncShopifyOrders() {
 }
 
 // Stages new mail from every configured inbox (mariniorders, eBay via Gmail,
-// Shop & Ship via info@) for the Claude review pass — does NOT try to match them.
+// Shop & Ship via info@), then has Claude read whatever is still `pending`
+// (new messages plus any left over from a prior run) and extract structured
+// Purchase/InboundShipment data. That read/extract step is safe to run
+// unattended — it only WRITES the parsed suggestion onto the PendingReceipt
+// itself (status: awaiting_confirmation), never onto Purchase/InboundShipment.
+// The actual application of that data only happens when a human confirms it
+// from the owner dashboard (see janmariniReceiptParser.confirmPendingReceipt).
 async function syncMailboxReceipts() {
   const configured = getConfiguredMailboxes();
   if (!configured.length) {
@@ -156,7 +163,15 @@ async function syncMailboxReceipts() {
     });
   }
   if (errors.length) console.warn("[janmarini] Mailbox errors:", JSON.stringify(errors));
-  return { staged: messages.length, skipped: false, mailboxesChecked, errors };
+
+  let parsed = { total: 0, parsed: 0, failed: 0, skipped: true };
+  if (process.env.ANTHROPIC_API_KEY) {
+    parsed = { ...(await processPendingReceipts()), skipped: false };
+  } else {
+    console.warn("[janmarini] Skipping receipt AI parse — ANTHROPIC_API_KEY not configured");
+  }
+
+  return { staged: messages.length, skipped: false, mailboxesChecked, errors, parsed };
 }
 
 // TODO: Aramex/Shop & Ship has no confirmed public tracking API wired up yet —

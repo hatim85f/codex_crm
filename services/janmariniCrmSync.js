@@ -23,12 +23,19 @@
 //
 // Fee methodology matches the CRM's own accounting convention (see the
 // profit-discrepancy investigation): 3% payment gateway + 2.9% Shopify fee on
-// revenue. No operating-expense share is set here — that's a monthly
-// allocation the accountant applies separately.
+// revenue, plus a flat AED 30/order delivery cost (same figure the owner
+// dashboard already shows). Employee salary, handling, rent, etc. are NOT
+// modeled here — those are monthly totals, not per-order costs, and the CRM
+// already has a mechanism for that: EcomOperatingExpense entries (entered
+// once a month via the Accounting module) get divided equally across every
+// eCommerce order that month via opexAllocation.recalcForBatch, which this
+// sync calls after every write so Janmarini orders participate in that
+// allocation automatically, same as any other business line.
 const ShopifyOrder = require("../models/janmarini/ShopifyOrder");
 const Purchase = require("../models/janmarini/Purchase");
 const EcommerceOrderProfit = require("../models/EcommerceOrderProfit");
 const { ensureOrderInvoice } = require("./janmariniInvoice");
+const { recalcForBatch } = require("./opexAllocation");
 
 const ORGANIZATION_ID = "6a308a0ff2cebbca8453bc2c"; // Codex FZE Technology
 const STORE_NAME = "Janmarini";
@@ -36,6 +43,7 @@ const AUTO_SYNC_NOTE = "Auto-synced by Janmarini Tracking automation";
 const PAYMENT_GATEWAY_FEE_PCT = 3;
 const SHOPIFY_FEE_PCT = 2.9;
 const AED_PER_USD = 3.8;
+const DELIVERY_FEE_AED = 30; // per order — matches the owner dashboard's flat delivery cost
 
 const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const digitsOnly = (s) => (s || "").replace(/\D/g, "").replace(/^0+/, "");
@@ -164,37 +172,50 @@ async function syncCrmProfitRecords({ dryRun = false } = {}) {
     const updateFields = {
       orders: orderLines,
       shippingCost: round(shippingCost),
+      courierDeliveryCost: round(DELIVERY_FEE_AED * orderLines.length), // last-mile, shared/allocated same as shipping
       paymentGatewayFeePct: PAYMENT_GATEWAY_FEE_PCT,
       shopifyFeePct: SHOPIFY_FEE_PCT,
       goodsReceiptFiles,
     };
 
+    let savedDoc = null;
     if (autoDocIds.size === 1) {
       const docId = [...autoDocIds][0];
       if (dryRun) {
         preview.push({ action: "update", docId, ...updateFields });
       } else {
-        await EcommerceOrderProfit.findByIdAndUpdate(docId, updateFields);
+        // findByIdAndUpdate would skip the pre-save profit-computation hook —
+        // fetch, assign, and save() so totals/profit actually recompute.
+        savedDoc = await EcommerceOrderProfit.findById(docId);
+        Object.assign(savedDoc, updateFields);
+        await savedDoc.save();
       }
       updated += 1;
-      continue;
-    }
-
-    const docPayload = {
-      organization: ORGANIZATION_ID,
-      storeName: STORE_NAME,
-      vendorSource: "ebay",
-      orderDate: earliestOrderDate,
-      notes: AUTO_SYNC_NOTE,
-      ...updateFields,
-    };
-
-    if (dryRun) {
-      preview.push({ action: "create", ...docPayload });
     } else {
-      await EcommerceOrderProfit.create(docPayload);
+      const docPayload = {
+        organization: ORGANIZATION_ID,
+        storeName: STORE_NAME,
+        vendorSource: "ebay",
+        orderDate: earliestOrderDate,
+        notes: AUTO_SYNC_NOTE,
+        ...updateFields,
+      };
+
+      if (dryRun) {
+        preview.push({ action: "create", ...docPayload });
+      } else {
+        savedDoc = await EcommerceOrderProfit.create(docPayload);
+      }
+      created += 1;
     }
-    created += 1;
+
+    // Fold in this month's operating expenses (employee salary, handling,
+    // rent, etc. — entered once via the Accounting module) divided equally
+    // across every order in the month, same mechanism every other business
+    // line already uses. Never runs during a dry run (it writes for real).
+    if (savedDoc && !dryRun) {
+      await recalcForBatch(ORGANIZATION_ID, savedDoc);
+    }
   }
 
   return {

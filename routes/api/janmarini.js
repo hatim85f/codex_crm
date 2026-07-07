@@ -15,6 +15,7 @@ const InboundShipment = require("../../models/janmarini/InboundShipment");
 const PendingReceipt = require("../../models/janmarini/PendingReceipt");
 const { runDailySync } = require("../../services/janmariniSync");
 const { fulfillShopifyOrder } = require("../../services/shopifyFulfillment");
+const { confirmPendingReceipt, rejectPendingReceipt } = require("../../services/janmariniReceiptParser");
 
 const getEmployeeSecret = () => process.env.JANMARINI_JWT_SECRET || "janmarini-dev-secret-change-me";
 
@@ -262,6 +263,36 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
     res.json(view);
   } catch (e) {
     res.status(500).json({ message: e.message });
+  }
+});
+
+// AI-parsed suggestions awaiting a human tap before anything gets written to
+// Purchase/InboundShipment — see services/janmariniReceiptParser.js. Owner
+// dashboard only; the employee never sees cost/purchase data.
+router.get("/owner/pending-receipts", ownerAuth, async (req, res) => {
+  try {
+    const items = await PendingReceipt.find({ status: "awaiting_confirmation" }).sort({ createdAt: -1 }).lean();
+    res.json(items);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+router.post("/owner/pending-receipts/:id/confirm", ownerAuth, async (req, res) => {
+  try {
+    const doc = await confirmPendingReceipt(req.params.id);
+    res.json(doc);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+router.post("/owner/pending-receipts/:id/reject", ownerAuth, async (req, res) => {
+  try {
+    const doc = await rejectPendingReceipt(req.params.id);
+    res.json(doc);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
   }
 });
 
