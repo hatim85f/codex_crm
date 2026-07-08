@@ -280,8 +280,8 @@ router.get("/owner/pending-receipts", ownerAuth, async (req, res) => {
 
 router.post("/owner/pending-receipts/:id/confirm", ownerAuth, async (req, res) => {
   try {
-    const doc = await confirmPendingReceipt(req.params.id);
-    res.json(doc);
+    const { receipt, applied, skipped, total } = await confirmPendingReceipt(req.params.id);
+    res.json({ ...receipt.toObject(), applied, skipped, total });
   } catch (e) {
     res.status(400).json({ message: e.message });
   }

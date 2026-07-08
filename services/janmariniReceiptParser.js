@@ -6,8 +6,16 @@
 // (see confirmPendingReceipt below, wired to owner-dashboard-facing routes).
 // This is deliberate: an unattended pathway that reads customer emails and
 // applies the result with no human check is exactly the kind of thing that
-// silently corrupts cost/status data — one tap from Hatim replaces that risk
-// with near-zero effort on her side while keeping a real human in the loop.
+// silently corrupts cost/status data — one tap replaces that risk with
+// near-zero effort while keeping a real human in the loop.
+//
+// One email/screenshot batch can genuinely cover MULTIPLE purchases or
+// shipment boxes (e.g. a "Shop & Ship Updates" email with 10 screenshots of
+// 10 different boxes). Earlier this only extracted a single "best guess" and
+// dumped everything else into a text note for a human to manually re-enter —
+// that defeated the point of automating this. Now it extracts an ARRAY and
+// the one Confirm tap applies every clearly-identified item/box at once;
+// only genuinely unmatched pieces are left out (noted, not silently dropped).
 const ShopifyOrder = require("../models/janmarini/ShopifyOrder");
 const Purchase = require("../models/janmarini/Purchase");
 const InboundShipment = require("../models/janmarini/InboundShipment");
@@ -32,43 +40,59 @@ const CLASSIFY_TOOL = {
   },
 };
 
+const PURCHASE_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    matchedOrderNumber: { type: "string", description: "Exact Shopify order number from the candidate list (e.g. '#1760'), or empty string if none match confidently" },
+    itemName: { type: "string", description: "Item name copied EXACTLY (character-for-character) from the matched candidate order's item list — never paraphrase, it's used for an exact-match lookup" },
+    quantity: { type: "number" },
+    costUSD: { type: "number", description: "Total amount paid in USD for this line (not per-unit unless quantity is 1); 0 if not shown" },
+    seller: { type: "string" },
+    ebayOrderNumber: { type: "string" },
+    sellerTracking: { type: "string", description: "Seller/USPS tracking number if present, otherwise empty string" },
+    confidence: { type: "string", enum: ["high", "low"] },
+    notes: { type: "string", description: "Why confidence is low, any ambiguity, or empty string if none" },
+  },
+  required: ["confidence", "notes"],
+};
+
 const PURCHASE_TOOL = {
-  name: "extract_purchase",
-  description: "Extract eBay purchase/order details from this receipt or confirmation email so it can be matched to a Shopify order.",
+  name: "extract_purchases",
+  description: "Extract every distinct eBay purchase/order line item from this receipt or confirmation email so each can be matched to a Shopify order. A single email can cover multiple items/orders bought in one checkout — list ALL of them, not just one.",
   input_schema: {
     type: "object",
     properties: {
-      matchedOrderNumber: { type: "string", description: "Exact Shopify order number from the candidate list (e.g. '#1760') this purchase fulfills, or empty string if none match confidently" },
-      itemName: { type: "string", description: "Item name as it should be matched against the Shopify order's line items" },
-      quantity: { type: "number" },
-      costUSD: { type: "number", description: "Total amount paid in USD for this line (not per-unit unless quantity is 1)" },
-      seller: { type: "string" },
-      ebayOrderNumber: { type: "string" },
-      sellerTracking: { type: "string", description: "Seller/USPS tracking number if present, otherwise empty string" },
-      confidence: { type: "string", enum: ["high", "low"] },
-      notes: { type: "string", description: "Why confidence is low, any ambiguity, or empty string if none" },
+      items: { type: "array", items: PURCHASE_ITEM_SCHEMA, description: "One entry per distinct item/line found. Empty array if nothing extractable." },
     },
-    required: ["confidence", "notes"],
+    required: ["items"],
   },
 };
 
+const SHIPMENT_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    snsShipmentNumber: { type: "string" },
+    status: { type: "string", enum: ["At Origin", "In Transit", "At Customs", "At Destination", "Delivered-to-office"] },
+    feesAED: { type: "number" },
+    feesPaid: { type: "boolean" },
+    weight: { type: "number" },
+    blockedReason: { type: "string", description: "Fill only if the journey log shows a real blocker (e.g. awaiting customer details for customs) — otherwise empty string" },
+    matchedOrderNumbers: { type: "array", items: { type: "string" }, description: "Shopify order number(s) whose items are in this box, from the candidate list — empty array if no confident match" },
+    confidence: { type: "string", enum: ["high", "low"] },
+    notes: { type: "string" },
+  },
+  required: ["confidence", "notes"],
+};
+
 const SHIPMENT_TOOL = {
-  name: "extract_shipment",
-  description: "Extract Shop & Ship (Aramex) shipment tracking details from this screenshot or email.",
+  name: "extract_shipments",
+  description: "Extract every distinct Shop & Ship (Aramex) shipment box found across this email's screenshot(s). A single email can contain screenshots of several different boxes — list ALL of them, not just one.",
   input_schema: {
     type: "object",
     properties: {
-      snsShipmentNumber: { type: "string" },
-      status: { type: "string", enum: ["At Origin", "In Transit", "At Customs", "At Destination", "Delivered-to-office"] },
-      feesAED: { type: "number" },
-      feesPaid: { type: "boolean" },
-      weight: { type: "number" },
-      blockedReason: { type: "string", description: "Fill only if the journey log shows a real blocker (e.g. awaiting customer details for customs) — otherwise empty string" },
-      matchedOrderNumbers: { type: "array", items: { type: "string" }, description: "Shopify order number(s) whose items are in this shipment, from the candidate list" },
-      confidence: { type: "string", enum: ["high", "low"] },
-      notes: { type: "string" },
+      shipments: { type: "array", items: SHIPMENT_ITEM_SCHEMA, description: "One entry per distinct box/tracking number found. Empty array if nothing extractable." },
     },
-    required: ["confidence", "notes"],
+    required: ["shipments"],
   },
 };
 
@@ -102,7 +126,7 @@ async function callClaude(promptText, attachments, tool) {
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 1024,
+      max_tokens: 4096,
       tools: [tool],
       tool_choice: { type: "tool", name: tool.name },
       messages: [{ role: "user", content }],
@@ -141,8 +165,13 @@ async function classifyContentType(receipt) {
   return result.contentType;
 }
 
+function overallConfidence(list) {
+  return list.length && list.every((x) => x.confidence === "high") ? "high" : "low";
+}
+
 // Reads every still-`pending` receipt with Claude and stores the structured
-// result. Read-only against Purchase/InboundShipment — no writes happen here.
+// result (an array of items/shipments, not just one). Read-only against
+// Purchase/InboundShipment — no writes happen here.
 async function processPendingReceipts() {
   const pending = await PendingReceipt.find({ status: "pending" });
   let parsed = 0;
@@ -163,16 +192,17 @@ async function processPendingReceipts() {
           ? `Candidate purchases awaiting a shipment (orderNumber: item, seller):\n${candidates || "(none)"}`
           : `Candidate Shopify orders (orderNumber: items):\n${candidates || "(none)"}`,
         "",
-        "Only set confidence 'high' if you are certain of the match. If the item/order is ambiguous or not in the candidate list, set confidence 'low' and explain in notes.",
+        "List EVERY distinct item/box found, not just one — a single email can cover several. Only set an individual entry's confidence to 'high' if you are certain of its match; use 'low' and explain in its notes if ambiguous.",
       ].join("\n");
 
       const result = isShipment
         ? await callClaude(promptText, receipt.attachments, SHIPMENT_TOOL)
         : await callClaude(promptText, receipt.attachments, PURCHASE_TOOL);
 
-      receipt.aiConfidence = result.confidence;
-      receipt.aiNotes = result.notes || "";
-      receipt.aiParsed = { ...result, contentType: isShipment ? "shipment" : "purchase" };
+      const list = isShipment ? result.shipments || [] : result.items || [];
+      receipt.aiConfidence = overallConfidence(list);
+      receipt.aiNotes = list.length > 1 ? `Covers ${list.length} distinct ${isShipment ? "shipment box(es)" : "item(s)"}.` : "";
+      receipt.aiParsed = { list, contentType: isShipment ? "shipment" : "purchase" };
       receipt.status = "awaiting_confirmation";
       await receipt.save();
       parsed += 1;
@@ -189,35 +219,34 @@ async function processPendingReceipts() {
   return { total: pending.length, parsed, failed };
 }
 
-async function applyPurchaseResult(receipt, parsed) {
-  if (!parsed.matchedOrderNumber || !parsed.itemName) {
-    return { ok: false, reason: "Parsed result is missing a matched order number or item name — cannot apply." };
+async function applyOnePurchase(receipt, item) {
+  if (!item.matchedOrderNumber || !item.itemName) {
+    return { ok: false, reason: "missing matched order number or item name" };
   }
-  const order = await ShopifyOrder.findOne({ orderNumber: parsed.matchedOrderNumber, ignored: false });
-  if (!order) return { ok: false, reason: `Order ${parsed.matchedOrderNumber} not found.` };
+  const order = await ShopifyOrder.findOne({ orderNumber: item.matchedOrderNumber, ignored: false });
+  if (!order) return { ok: false, reason: `order ${item.matchedOrderNumber} not found` };
 
   const existing = await Purchase.findOne({
-    orderNumber: parsed.matchedOrderNumber,
-    itemName: new RegExp(`^${parsed.itemName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+    orderNumber: item.matchedOrderNumber,
+    itemName: new RegExp(`^${item.itemName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
   });
 
   if (existing) {
-    if (!existing.costUSD) existing.costUSD = parsed.costUSD || 0;
-    if (!existing.seller) existing.seller = parsed.seller || "";
-    if (!existing.ebayOrderNumber) existing.ebayOrderNumber = parsed.ebayOrderNumber || "";
-    if (!existing.sellerTracking) existing.sellerTracking = parsed.sellerTracking || "";
-    if (!existing.receiptFiles?.length) existing.receiptFiles = (receipt.attachments || []).map((a) => a.url);
+    if (!existing.costUSD) existing.costUSD = item.costUSD || 0;
+    if (!existing.seller) existing.seller = item.seller || "";
+    if (!existing.ebayOrderNumber) existing.ebayOrderNumber = item.ebayOrderNumber || "";
+    if (!existing.sellerTracking) existing.sellerTracking = item.sellerTracking || "";
     if (!existing.purchaseDate) existing.purchaseDate = receipt.receivedAt || new Date();
     await existing.save();
   } else {
     await Purchase.create({
-      orderNumber: parsed.matchedOrderNumber,
-      itemName: parsed.itemName,
-      quantity: parsed.quantity || 1,
-      ebayOrderNumber: parsed.ebayOrderNumber || "",
-      seller: parsed.seller || "",
-      costUSD: parsed.costUSD || 0,
-      sellerTracking: parsed.sellerTracking || "",
+      orderNumber: item.matchedOrderNumber,
+      itemName: item.itemName,
+      quantity: item.quantity || 1,
+      ebayOrderNumber: item.ebayOrderNumber || "",
+      seller: item.seller || "",
+      costUSD: item.costUSD || 0,
+      sellerTracking: item.sellerTracking || "",
       purchaseDate: receipt.receivedAt || new Date(),
       receiptFiles: (receipt.attachments || []).map((a) => a.url),
     });
@@ -225,35 +254,33 @@ async function applyPurchaseResult(receipt, parsed) {
   return { ok: true };
 }
 
-async function applyShipmentResult(receipt, parsed) {
-  if (!parsed.snsShipmentNumber) {
-    return { ok: false, reason: "Parsed result is missing a Shop & Ship shipment number — cannot apply." };
-  }
+async function applyOneShipment(receipt, item) {
+  if (!item.snsShipmentNumber) return { ok: false, reason: "missing Shop & Ship shipment number" };
 
-  const existing = await InboundShipment.findOne({ snsShipmentNumber: parsed.snsShipmentNumber });
+  const existing = await InboundShipment.findOne({ snsShipmentNumber: item.snsShipmentNumber });
   const now = new Date();
   const update = {
-    seller: parsed.seller || existing?.seller || "",
-    weight: parsed.weight || existing?.weight || 0,
-    feesAED: parsed.feesAED ?? existing?.feesAED ?? 0,
-    feesPaid: parsed.feesPaid ?? existing?.feesPaid ?? false,
-    status: parsed.status || existing?.status || "At Origin",
+    seller: item.seller || existing?.seller || "",
+    weight: item.weight || existing?.weight || 0,
+    feesAED: item.feesAED ?? existing?.feesAED ?? 0,
+    feesPaid: item.feesPaid ?? existing?.feesPaid ?? false,
+    status: item.status || existing?.status || "At Origin",
     lastTrackingCheck: now,
-    blockedReason: parsed.blockedReason || "",
+    blockedReason: item.blockedReason || "",
   };
   if (update.feesPaid && !existing?.feesPaidDate) update.feesPaidDate = now;
   if (update.status === "At Destination" && !existing?.atDestinationDate) update.atDestinationDate = now;
   if (update.status === "Delivered-to-office" && !existing?.deliveredDate) update.deliveredDate = now;
 
   const shipment = await InboundShipment.findOneAndUpdate(
-    { snsShipmentNumber: parsed.snsShipmentNumber },
+    { snsShipmentNumber: item.snsShipmentNumber },
     update,
     { upsert: true, new: true }
   );
 
-  if (parsed.matchedOrderNumbers?.length) {
+  if (item.matchedOrderNumbers?.length) {
     await Purchase.updateMany(
-      { orderNumber: { $in: parsed.matchedOrderNumbers }, inboundShipment: null },
+      { orderNumber: { $in: item.matchedOrderNumbers }, inboundShipment: null },
       { inboundShipment: shipment._id }
     );
   }
@@ -262,28 +289,36 @@ async function applyShipmentResult(receipt, parsed) {
 
 // The ONLY place a PendingReceipt's parsed data actually gets written to
 // Purchase/InboundShipment — called from an owner-authenticated "confirm" tap,
-// never automatically.
+// never automatically. Applies EVERY identified item/box in one go; anything
+// that couldn't be matched is skipped (not silently discarded — reflected in
+// the returned skipped count) rather than blocking the whole confirm.
 async function confirmPendingReceipt(receiptId) {
   const receipt = await PendingReceipt.findById(receiptId);
   if (!receipt) throw new Error("Pending receipt not found");
   if (receipt.status !== "awaiting_confirmation") throw new Error(`Cannot confirm a receipt with status "${receipt.status}"`);
   if (!receipt.aiParsed) throw new Error("No parsed data to confirm");
 
-  // contentType is stamped at parse time (classified for "mariniorders" since
-  // that mailbox now gets both bills and screenshots); fall back to the old
-  // mailbox-based assumption for any pre-existing receipt parsed before that.
-  const isShipment = receipt.aiParsed.contentType
-    ? receipt.aiParsed.contentType === "shipment"
-    : receipt.source === "shopandship";
-  const result = isShipment
-    ? await applyShipmentResult(receipt, receipt.aiParsed)
-    : await applyPurchaseResult(receipt, receipt.aiParsed);
+  const isShipment = receipt.aiParsed.contentType === "shipment";
+  const list = receipt.aiParsed.list || (receipt.aiParsed.snsShipmentNumber || receipt.aiParsed.matchedOrderNumber ? [receipt.aiParsed] : []); // fall back for older single-item aiParsed shape
 
-  if (!result.ok) throw new Error(result.reason);
+  let applied = 0;
+  let skipped = 0;
+  for (const item of list) {
+    const result = isShipment ? await applyOneShipment(receipt, item) : await applyOnePurchase(receipt, item);
+    if (result.ok) applied += 1;
+    else skipped += 1;
+  }
+
+  if (applied === 0 && list.length > 0) {
+    throw new Error(`Could not apply any of the ${list.length} item(s) — none matched a known order.`);
+  }
+  if (list.length === 0) {
+    throw new Error("No items/boxes were extracted from this receipt.");
+  }
 
   receipt.status = "processed";
   await receipt.save();
-  return receipt;
+  return { receipt, applied, skipped, total: list.length };
 }
 
 async function rejectPendingReceipt(receiptId) {
