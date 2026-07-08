@@ -15,6 +15,23 @@ const PendingReceipt = require("../models/janmarini/PendingReceipt");
 
 const ANTHROPIC_MODEL = process.env.JANMARINI_PARSER_MODEL || "claude-sonnet-5";
 
+// mariniorders@ now receives BOTH eBay purchase receipts AND Shop&Ship
+// screenshots (Hatim sends everything there) — so unlike the "ebay" and
+// "shopandship" mailbox sources, content type can't be inferred from the
+// mailbox alone. This classifies first, then routes to the right extraction
+// tool.
+const CLASSIFY_TOOL = {
+  name: "classify_content",
+  description: "Determine whether this email/attachment is an eBay purchase receipt/confirmation, or a Shop & Ship (Aramex) shipment screenshot.",
+  input_schema: {
+    type: "object",
+    properties: {
+      contentType: { type: "string", enum: ["purchase", "shipment", "unclear"] },
+    },
+    required: ["contentType"],
+  },
+};
+
 const PURCHASE_TOOL = {
   name: "extract_purchase",
   description: "Extract eBay purchase/order details from this receipt or confirmation email so it can be matched to a Shopify order.",
@@ -108,6 +125,22 @@ async function buildUnlinkedPurchaseCandidates() {
   return purchases.map((p) => `${p.orderNumber}: ${p.itemName} (seller: ${p.seller || "?"})`).join("\n");
 }
 
+function basePromptLines(receipt) {
+  return [
+    `Email subject: ${receipt.subject}`,
+    `From: ${receipt.from}`,
+    `Body:\n${receipt.bodyText?.slice(0, 4000) || "(no text body)"}`,
+  ];
+}
+
+// mariniorders@ receives both eBay bills and Shop&Ship screenshots now, so
+// content type can't be assumed from the mailbox — ask the model first.
+async function classifyContentType(receipt) {
+  const promptText = [...basePromptLines(receipt), "", "Is this an eBay purchase receipt/confirmation, or a Shop & Ship shipment screenshot/update?"].join("\n");
+  const result = await callClaude(promptText, receipt.attachments, CLASSIFY_TOOL);
+  return result.contentType;
+}
+
 // Reads every still-`pending` receipt with Claude and stores the structured
 // result. Read-only against Purchase/InboundShipment — no writes happen here.
 async function processPendingReceipts() {
@@ -117,12 +150,14 @@ async function processPendingReceipts() {
 
   for (const receipt of pending) {
     try {
-      const isShipment = receipt.source === "shopandship";
+      let isShipment;
+      if (receipt.source === "shopandship") isShipment = true;
+      else if (receipt.source === "ebay") isShipment = false;
+      else isShipment = (await classifyContentType(receipt)) === "shipment"; // "mariniorders" — ambiguous, classify
+
       const candidates = isShipment ? await buildUnlinkedPurchaseCandidates() : await buildOrderCandidates();
       const promptText = [
-        `Email subject: ${receipt.subject}`,
-        `From: ${receipt.from}`,
-        `Body:\n${receipt.bodyText?.slice(0, 4000) || "(no text body)"}`,
+        ...basePromptLines(receipt),
         "",
         isShipment
           ? `Candidate purchases awaiting a shipment (orderNumber: item, seller):\n${candidates || "(none)"}`
@@ -137,7 +172,7 @@ async function processPendingReceipts() {
 
       receipt.aiConfidence = result.confidence;
       receipt.aiNotes = result.notes || "";
-      receipt.aiParsed = result;
+      receipt.aiParsed = { ...result, contentType: isShipment ? "shipment" : "purchase" };
       receipt.status = "awaiting_confirmation";
       await receipt.save();
       parsed += 1;
@@ -234,7 +269,12 @@ async function confirmPendingReceipt(receiptId) {
   if (receipt.status !== "awaiting_confirmation") throw new Error(`Cannot confirm a receipt with status "${receipt.status}"`);
   if (!receipt.aiParsed) throw new Error("No parsed data to confirm");
 
-  const isShipment = receipt.source === "shopandship";
+  // contentType is stamped at parse time (classified for "mariniorders" since
+  // that mailbox now gets both bills and screenshots); fall back to the old
+  // mailbox-based assumption for any pre-existing receipt parsed before that.
+  const isShipment = receipt.aiParsed.contentType
+    ? receipt.aiParsed.contentType === "shipment"
+    : receipt.source === "shopandship";
   const result = isShipment
     ? await applyShipmentResult(receipt, receipt.aiParsed)
     : await applyPurchaseResult(receipt, receipt.aiParsed);
