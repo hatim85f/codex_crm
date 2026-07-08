@@ -207,10 +207,14 @@ async function processPendingReceipts() {
       await receipt.save();
       parsed += 1;
     } catch (e) {
-      receipt.status = "awaiting_confirmation";
-      receipt.aiConfidence = "low";
-      receipt.aiNotes = `Parsing failed: ${e.message}`;
-      receipt.aiParsed = null;
+      // A technical failure (API error, credit balance, network) is NOT the
+      // same as "nothing found in this email" — surfacing it as an
+      // awaiting_confirmation card with no data is actively misleading
+      // (it reads as "confirmed nothing here" when the truth is "couldn't
+      // even try"). Leave it `pending` so the next scheduled run retries it
+      // automatically once whatever broke is fixed; only the failure reason
+      // is recorded for visibility if someone checks the raw data.
+      receipt.aiNotes = `Parsing failed, will retry next run: ${e.message}`;
       await receipt.save().catch(() => {});
       failed += 1;
     }
