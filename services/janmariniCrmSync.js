@@ -87,27 +87,73 @@ async function buildOrderLine(order, itemsForOrder, dryRun) {
   };
 }
 
+// Rebuilds a doc's orders[] + shared costs FULLY FRESH from every costed
+// Purchase currently on record for the given order numbers — not just the
+// purchases in whatever batch triggered this update. This is what makes
+// re-syncing idempotent and safe even when a single order accumulates items
+// from more than one source over time (e.g. one item bought on eBay in a
+// checkout batch, another added later from existing stock with no eBay
+// purchase at all) — the earlier version only wrote the current batch's
+// items and silently wiped out anything from a prior batch sharing the doc.
+async function rebuildDocContents(orderNumbers, orderByNumber, dryRun) {
+  const purchases = await Purchase.find({ orderNumber: { $in: orderNumbers }, costUSD: { $gt: 0 } })
+    .populate("inboundShipment", "snsShipmentNumber feesAED")
+    .lean();
+
+  const shopifyOrdersInSet = orderNumbers.map((n) => orderByNumber.get(n)).filter(Boolean);
+  const orderLines = await Promise.all(
+    shopifyOrdersInSet.map((order) =>
+      buildOrderLine(order, purchases.filter((p) => p.orderNumber === order.orderNumber), dryRun)
+    )
+  );
+
+  const shipmentIds = new Set();
+  let shippingCost = 0;
+  for (const p of purchases) {
+    if (p.inboundShipment && !shipmentIds.has(String(p.inboundShipment._id))) {
+      shipmentIds.add(String(p.inboundShipment._id));
+      shippingCost += Number(p.inboundShipment.feesAED) || 0;
+    }
+  }
+  const goodsReceiptFiles = [
+    ...new Map(
+      purchases.flatMap((p) => p.receiptFiles || []).map((url) => [url, { fileName: "", fileUrl: url }])
+    ).values(),
+  ];
+
+  return {
+    orders: orderLines,
+    shippingCost: round(shippingCost),
+    courierDeliveryCost: round(DELIVERY_FEE_AED * orderLines.length),
+    paymentGatewayFeePct: PAYMENT_GATEWAY_FEE_PCT,
+    shopifyFeePct: SHOPIFY_FEE_PCT,
+    goodsReceiptFiles,
+  };
+}
+
 async function syncCrmProfitRecords({ dryRun = false } = {}) {
   const existingDocs = await EcommerceOrderProfit.find({ organization: ORGANIZATION_ID })
     .select("orders.orderNumber notes")
     .lean();
   const existingByDigits = new Map(); // digitsOnly(orderNumber) -> { docId, isAuto }
+  const docOrderNumbers = new Map(); // docId -> Set of that doc's current order numbers (real, not digits-only)
   for (const doc of existingDocs) {
     for (const o of doc.orders || []) {
       existingByDigits.set(digitsOnly(o.orderNumber), { docId: doc._id, isAuto: doc.notes === AUTO_SYNC_NOTE });
+      const key = String(doc._id);
+      if (!docOrderNumbers.has(key)) docOrderNumbers.set(key, new Set());
+      docOrderNumbers.get(key).add(o.orderNumber);
     }
   }
 
   const shopifyOrders = await ShopifyOrder.find({ ignored: false }).lean();
   const orderByNumber = new Map(shopifyOrders.map((o) => [o.orderNumber, o]));
 
-  const purchases = await Purchase.find({ costUSD: { $gt: 0 } })
-    .populate("inboundShipment", "snsShipmentNumber feesAED")
-    .lean();
+  const purchases = await Purchase.find({ costUSD: { $gt: 0 } }).select("orderNumber ebayOrderNumber").lean();
 
   // Group into eBay-checkout batches. Purchases with no ebayOrderNumber yet
-  // (data-entry gap) each become their own singleton batch rather than being
-  // silently lumped together under one empty key.
+  // (in-stock items, or a data-entry gap) each become their own singleton
+  // batch rather than being silently lumped together under one empty key.
   const batches = new Map();
   for (const p of purchases) {
     const key = p.ebayOrderNumber ? `ebay:${p.ebayOrderNumber}` : `solo:${p._id}`;
@@ -137,68 +183,36 @@ async function syncCrmProfitRecords({ dryRun = false } = {}) {
       continue;
     }
 
-    const shopifyOrdersInBatch = orderNumbers.map((n) => orderByNumber.get(n)).filter(Boolean);
-    if (shopifyOrdersInBatch.length !== orderNumbers.length) {
+    if (orderNumbers.some((n) => !orderByNumber.has(n))) {
       skippedNoShopifyOrder += 1; // a purchase references a Shopify order we don't have (ignored/typo)
       continue;
     }
 
-    const orderLines = await Promise.all(
-      shopifyOrdersInBatch.map((order) =>
-        buildOrderLine(order, batchPurchases.filter((p) => p.orderNumber === order.orderNumber), dryRun)
-      )
-    );
-
-    // Shared batch-level cost: shipping fees, deduped by shipment (several
-    // items in the batch usually travel in the same box), and the eBay
-    // purchase receipt(s) — deduped by URL since one receipt often covers
-    // every item in the batch.
-    const shipmentIds = new Set();
-    let shippingCost = 0;
-    for (const p of batchPurchases) {
-      if (p.inboundShipment && !shipmentIds.has(String(p.inboundShipment._id))) {
-        shipmentIds.add(String(p.inboundShipment._id));
-        shippingCost += Number(p.inboundShipment.feesAED) || 0;
-      }
-    }
-    const goodsReceiptFiles = [
-      ...new Map(
-        batchPurchases.flatMap((p) => p.receiptFiles || []).map((url) => [url, { fileName: "", fileUrl: url }])
-      ).values(),
-    ];
-
-    const earliestOrderDate = orderLines.map((o) => o.orderDate).filter(Boolean).sort()[0] || new Date();
-
-    const updateFields = {
-      orders: orderLines,
-      shippingCost: round(shippingCost),
-      courierDeliveryCost: round(DELIVERY_FEE_AED * orderLines.length), // last-mile, shared/allocated same as shipping
-      paymentGatewayFeePct: PAYMENT_GATEWAY_FEE_PCT,
-      shopifyFeePct: SHOPIFY_FEE_PCT,
-      goodsReceiptFiles,
-    };
-
     let savedDoc = null;
     if (autoDocIds.size === 1) {
       const docId = [...autoDocIds][0];
+      const fullOrderNumbers = [...new Set([...(docOrderNumbers.get(docId) || []), ...orderNumbers])];
+      const fields = await rebuildDocContents(fullOrderNumbers, orderByNumber, dryRun);
       if (dryRun) {
-        preview.push({ action: "update", docId, ...updateFields });
+        preview.push({ action: "update", docId, ...fields });
       } else {
         // findByIdAndUpdate would skip the pre-save profit-computation hook —
         // fetch, assign, and save() so totals/profit actually recompute.
         savedDoc = await EcommerceOrderProfit.findById(docId);
-        Object.assign(savedDoc, updateFields);
+        Object.assign(savedDoc, fields);
         await savedDoc.save();
       }
       updated += 1;
     } else {
+      const fields = await rebuildDocContents(orderNumbers, orderByNumber, dryRun);
+      const earliestOrderDate = fields.orders.map((o) => o.orderDate).filter(Boolean).sort()[0] || new Date();
       const docPayload = {
         organization: ORGANIZATION_ID,
         storeName: STORE_NAME,
         vendorSource: "ebay",
         orderDate: earliestOrderDate,
         notes: AUTO_SYNC_NOTE,
-        ...updateFields,
+        ...fields,
       };
 
       if (dryRun) {
