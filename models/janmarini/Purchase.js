@@ -15,7 +15,7 @@ const STATUSES = [
 
 const PurchaseSchema = new Schema(
   {
-    orderNumber: { type: String, required: true, index: true }, // Shopify order this item is for, e.g. "#1750"
+    orderNumber: { type: String, default: "", index: true }, // Shopify order this item is for, e.g. "#1750" — blank for unassigned stock
     itemName: { type: String, required: true, trim: true },
     quantity: { type: Number, default: 1 },
 
@@ -30,6 +30,15 @@ const PurchaseSchema = new Schema(
     purchaseDate: { type: Date, default: null },
     receiptFiles: { type: [String], default: [] }, // Cloudinary URLs (audit trail, mirrors Codex CRM)
     flagNote: { type: String, default: "" }, // e.g. "ordered Retinol Plus, receipt shows Peptide Extreme"
+
+    // Unassigned inventory — an item that's been bought but isn't (or is no
+    // longer) tied to a live order, e.g. leftover goods from a cancelled
+    // order, or something the fulfillment team logged by hand. Kept as a flag
+    // on the same Purchase model rather than a separate collection so it
+    // reuses status/cost/tracking instead of duplicating them.
+    isStock: { type: Boolean, default: false, index: true },
+    stockNote: { type: String, default: "" }, // e.g. "from cancelled order #1754"
+    shopAndShipTracking: { type: String, default: "" }, // lightweight tracking # for stock items with no full InboundShipment record yet
   },
   { timestamps: true }
 );

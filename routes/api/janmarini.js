@@ -321,6 +321,59 @@ router.post("/orders/:orderNumber/fulfill", employeeAuth, async (req, res) => {
   }
 });
 
+// ---- Stock (unassigned inventory) ------------------------------------------
+// Items already bought but not tied to a live order — e.g. leftovers from a
+// cancelled order, or something the fulfillment team physically has and logs
+// by hand. employeeAuth (not ownerAuth) so both the fulfillment team and
+// owner can view/add — it only ever checks token validity, not role. Cost is
+// stripped for non-owner callers, same rule as every other employee-facing
+// view in this file.
+router.get("/stock", employeeAuth, async (req, res) => {
+  try {
+    const decoded = jwt.verify(req.header("x-auth-token"), getEmployeeSecret());
+    const isOwner = decoded.role === "janmarini_owner";
+    const items = await Purchase.find({ isStock: true }).sort({ updatedAt: -1 }).lean();
+    res.json(
+      items.map((p) => ({
+        id: p._id,
+        itemName: p.itemName,
+        quantity: p.quantity,
+        status: p.status,
+        shopAndShipTracking: p.shopAndShipTracking || "",
+        stockNote: p.stockNote || "",
+        ...(isOwner ? { costUSD: p.costUSD || 0 } : {}),
+      }))
+    );
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+router.post("/stock", employeeAuth, async (req, res) => {
+  try {
+    const { itemName, quantity, shopAndShipTracking, stockNote, costUSD } = req.body || {};
+    if (!itemName || !String(itemName).trim()) {
+      return res.status(400).json({ message: "Item name is required" });
+    }
+    const decoded = jwt.verify(req.header("x-auth-token"), getEmployeeSecret());
+    const isOwner = decoded.role === "janmarini_owner";
+
+    const doc = await Purchase.create({
+      itemName: String(itemName).trim(),
+      quantity: Number(quantity) || 1,
+      shopAndShipTracking: shopAndShipTracking || "",
+      stockNote: stockNote || "",
+      costUSD: isOwner ? Number(costUSD) || 0 : 0, // only the owner can record cost
+      isStock: true,
+      status: "in_office", // fulfillment team only logs stock they physically already have
+      orderNumber: "",
+    });
+    res.status(201).json(doc);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
 // ---- Admin / agent endpoints ----------------------------------------------
 
 function adminAuth(req, res, next) {
