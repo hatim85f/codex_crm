@@ -221,6 +221,17 @@ async function syncCrmProfitRecords({ dryRun = false } = {}) {
         savedDoc = await EcommerceOrderProfit.create(docPayload);
       }
       created += 1;
+
+      // A single order can have items split across more than one eBay-checkout
+      // batch (e.g. two different sellers, no shared ebayOrderNumber) — if
+      // NEITHER batch has an existing doc yet, the first batch's "create" must
+      // be reflected here immediately, or the second batch (still consulting
+      // the pre-loop snapshot) creates a SECOND doc for the same order and
+      // double-counts its revenue. Registering it now makes every later batch
+      // in this same run see it as existing and take the update path instead.
+      const newDocId = dryRun ? `preview:${orderNumbers.join(",")}` : String(savedDoc._id);
+      for (const n of orderNumbers) existingByDigits.set(digitsOnly(n), { docId: newDocId, isAuto: true });
+      docOrderNumbers.set(newDocId, new Set(orderNumbers));
     }
 
     // Fold in this month's operating expenses (employee salary, handling,

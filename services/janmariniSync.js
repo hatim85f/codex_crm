@@ -11,7 +11,7 @@ const { getShopifyAccessToken } = require("./shopifyAuth");
 const { syncCrmProfitRecords } = require("./janmariniCrmSync");
 const { processPendingReceipts } = require("./janmariniReceiptParser");
 
-const IGNORED_ORDER_NUMBERS = ["#1760", "#1761", "#1762"];
+const IGNORED_ORDER_NUMBERS = ["#1760", "#1761", "#1762", "#1754", "#1766"];
 
 // Real orders only start Jun 20 (per JANMARINI_FULFILLMENT.md) — everything
 // before that is unrelated store history, not worth syncing. Override via env
