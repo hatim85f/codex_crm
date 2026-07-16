@@ -10,6 +10,7 @@ const { auth, requireRole } = require("../../middleware/auth");
 const { canSeeAllLeads: isAdmin, visibleAssigneeIds } = require("../../services/leadsScope");
 const { DEPARTMENTS, departmentForRole } = require("../../services/departments");
 const { TASK_STATUSES, TASK_TYPES, TASK_PRIORITIES, TASK_RELATED_MODULES } = require("../../models/Task");
+const { createNotification } = require("../../services/notify");
 
 // Every internal role can use the Task Center (it's where members see assigned work).
 const INTERNAL = ["owner_admin", "admin", "sales", "marketing", "team_leader",
@@ -98,6 +99,16 @@ function canApprove(req, task) {
   if (isAdmin(req)) return true;
   const approver = task.approverId?._id || task.approverId;
   return approver && String(approver) === String(req.user.id);
+}
+
+function isAssignee(req, task) {
+  const assigned = task.assignedTo?._id || task.assignedTo;
+  return assigned && String(assigned) === String(req.user.id);
+}
+
+function canManageWorkflow(req, task) {
+  const creator = task.createdBy?._id || task.createdBy;
+  return isAdmin(req) || isAssignee(req, task) || (creator && String(creator) === String(req.user.id));
 }
 
 async function logActivity(req, taskId, type, extra = {}) {
@@ -247,9 +258,8 @@ router.get("/approved", async (req, res) => {
 // GET /tasks/calendar?from=&to=  — scheduled + unscheduled tasks for planning.
 router.get("/calendar", async (req, res) => {
   try {
-    const base = { organization: req.user.organization, isDeleted: false, status: { $nin: ["approved", "cancelled", "completed"] } };
-    const scope = await taskScope(req);
-    const query = scope ? { ...base, ...scope } : base;
+    const base = { organization: req.user.organization, isDeleted: false, assignedTo: req.user.id, status: { $nin: ["approved", "cancelled", "completed"] } };
+    const query = base;
     if (req.query.from || req.query.to) {
       query.$or = [
         { scheduledDate: { ...(req.query.from ? { $gte: new Date(req.query.from) } : {}), ...(req.query.to ? { $lte: new Date(req.query.to) } : {}) } },
@@ -400,6 +410,13 @@ router.patch("/:id/status", async (req, res) => {
     if (!TASK_STATUSES.includes(status)) return res.status(400).json({ message: "Invalid status" });
     const task = await loadTask(req, res);
     if (!task) return;
+    if (!canManageWorkflow(req, task)) return res.status(403).json({ message: "You cannot change this task's status." });
+    if (["submitted_for_approval", "approved", "completed"].includes(status)) {
+      return res.status(400).json({ message: "Use the submit or approval action for this status." });
+    }
+    if (["submitted_for_approval", "approved"].includes(task.status)) {
+      return res.status(400).json({ message: "This task is locked while it is in review or approved." });
+    }
     const old = task.status;
     task.status = status;
     task.completedAt = status === "completed" ? new Date() : null;
@@ -447,13 +464,27 @@ router.patch("/:id/schedule", async (req, res) => {
   try {
     const task = await loadTask(req, res);
     if (!task) return;
+    if (!(isAdmin(req) || isAssignee(req, task))) {
+      return res.status(403).json({ message: "Only the assignee or a manager can plan this task." });
+    }
     const had = !!task.scheduledDate;
-    task.scheduledDate = req.body?.scheduledDate || null;
+    const start = req.body?.scheduledDate ? new Date(req.body.scheduledDate) : null;
+    const requestedMinutes = Number(req.body?.plannedMinutes || task.plannedMinutes || 60);
+    const plannedMinutes = Math.max(15, Math.min(43200, Number.isFinite(requestedMinutes) ? requestedMinutes : 60));
+    const end = start
+      ? (req.body?.scheduledEndDate ? new Date(req.body.scheduledEndDate) : new Date(start.getTime() + plannedMinutes * 60000))
+      : null;
+    if (start && (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start)) {
+      return res.status(400).json({ message: "Choose a valid planned start and end time." });
+    }
+    task.scheduledDate = start;
+    task.scheduledEndDate = end;
+    task.plannedMinutes = start ? Math.round((end.getTime() - start.getTime()) / 60000) : plannedMinutes;
     // First scheduling promotes a plain to-do to "scheduled"; never touches completion.
     if (task.scheduledDate && task.status === "todo") task.status = "scheduled";
     task.updatedBy = req.user.id;
     await task.save();
-    await logActivity(req, task._id, had ? "rescheduled" : "scheduled", { message: task.scheduledDate ? `Scheduled for ${new Date(task.scheduledDate).toDateString()}` : "Unscheduled" });
+    await logActivity(req, task._id, had ? "rescheduled" : "scheduled", { message: task.scheduledDate ? `Planned for ${new Date(task.scheduledDate).toLocaleString()} (${task.plannedMinutes} min)` : "Unscheduled" });
     const out = await Task.findById(task._id).populate(POPULATE);
     return res.json(out);
   } catch (err) {
@@ -467,6 +498,8 @@ router.post("/:id/start", async (req, res) => {
   try {
     const task = await loadTask(req, res);
     if (!task) return;
+    if (!isAssignee(req, task) && !isAdmin(req)) return res.status(403).json({ message: "Only the assignee can start this task." });
+    if (["submitted_for_approval", "approved", "cancelled"].includes(task.status)) return res.status(400).json({ message: "This task cannot be started in its current status." });
     task.status = "in_progress";
     task.updatedBy = req.user.id;
     await task.save();
@@ -484,6 +517,8 @@ router.post("/:id/submit-for-approval", async (req, res) => {
   try {
     const task = await loadTask(req, res);
     if (!task) return;
+    if (!isAssignee(req, task)) return res.status(403).json({ message: "Only the assignee can submit this task." });
+    if (["submitted_for_approval", "approved", "cancelled"].includes(task.status)) return res.status(400).json({ message: "This task cannot be submitted in its current status." });
     const b = req.body || {};
     task.status = "submitted_for_approval";
     task.approvalStatus = "pending";
@@ -491,10 +526,17 @@ router.post("/:id/submit-for-approval", async (req, res) => {
     task.submittedBy = req.user.id;
     task.completionNotes = String(b.completionNotes || task.completionNotes || "");
     task.approverId = await resolveApprover(task);
+    if (task.approverId && String(task.approverId) === String(req.user.id)) task.approverId = null;
+    if (!task.approverId) {
+      const fallback = await User.findOne({ organization: req.user.organization, role: { $in: ["owner_admin", "admin", "team_leader"] }, status: "active", _id: { $ne: req.user.id } }).sort({ role: 1 }).select("_id");
+      task.approverId = fallback?._id || null;
+    }
+    if (!task.approverId) return res.status(400).json({ message: "No manager is available to approve this task." });
     if (Array.isArray(b.attachments)) b.attachments.forEach((a) => a?.fileUrl && task.attachments.push({ ...a, uploadedBy: req.user.id }));
     task.updatedBy = req.user.id;
     await task.save();
     await logActivity(req, task._id, "submitted_for_approval", { message: task.completionNotes || "Submitted for approval" });
+    await createNotification({ organization: req.user.organization, recipientUserId: task.approverId, audience: "internal", type: "task.submitted", title: "Task waiting for approval", message: `${task.title} was submitted for your approval.`, link: `tasks/${task._id}`, meta: { taskId: task._id } });
     const out = await Task.findById(task._id).populate(POPULATE);
     return res.json(out);
   } catch (err) {
@@ -509,7 +551,7 @@ router.post("/:id/approve", async (req, res) => {
     const task = await loadTask(req, res);
     if (!task) return;
     if (task.status !== "submitted_for_approval") return res.status(400).json({ message: "Task is not awaiting approval." });
-    if (!canApprove(req, task)) return res.status(403).json({ message: "Only the project lead or an admin can approve this task." });
+    if (!canApprove(req, task)) return res.status(403).json({ message: "Only the task creator, project lead, or an admin can approve this task." });
     task.status = "approved";
     task.approvalStatus = "approved";
     task.approvedAt = new Date();
@@ -519,6 +561,7 @@ router.post("/:id/approve", async (req, res) => {
     task.updatedBy = req.user.id;
     await task.save();
     await logActivity(req, task._id, "approved", { message: req.body?.comment || "Approved" });
+    await createNotification({ organization: req.user.organization, recipientUserId: task.assignedTo?._id || task.assignedTo, audience: "internal", type: "task.approved", title: "Task approved", message: `${task.title} was approved.`, link: `tasks/${task._id}`, meta: { taskId: task._id } });
     const out = await Task.findById(task._id).populate(POPULATE);
     return res.json(out);
   } catch (err) {
@@ -535,7 +578,7 @@ router.post("/:id/request-changes", async (req, res) => {
     const comment = String(req.body?.comment || "").trim();
     if (!comment) return res.status(400).json({ message: "Please describe the changes you'd like." });
     if (task.status !== "submitted_for_approval") return res.status(400).json({ message: "Task is not awaiting approval." });
-    if (!canApprove(req, task)) return res.status(403).json({ message: "Only the project lead or an admin can review this task." });
+    if (!canApprove(req, task)) return res.status(403).json({ message: "Only the task creator, project lead, or an admin can review this task." });
     task.status = "changes_requested";
     task.approvalStatus = "changes_requested";
     task.reviewComment = comment;
@@ -543,6 +586,7 @@ router.post("/:id/request-changes", async (req, res) => {
     task.updatedBy = req.user.id;
     await task.save();
     await logActivity(req, task._id, "changes_requested", { message: comment });
+    await createNotification({ organization: req.user.organization, recipientUserId: task.assignedTo?._id || task.assignedTo, audience: "internal", type: "task.changes_requested", title: "Changes requested", message: `${task.title}: ${comment}`, link: `tasks/${task._id}`, meta: { taskId: task._id } });
     const out = await Task.findById(task._id).populate(POPULATE);
     return res.json(out);
   } catch (err) {

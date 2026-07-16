@@ -71,7 +71,9 @@ const TaskSchema = new Schema(
     status: { type: String, enum: TASK_STATUSES, default: "todo", index: true },
 
     dueDate: { type: Date, default: null, index: true },
-    scheduledDate: { type: Date, default: null, index: true }, // calendar planning slot (does NOT affect completion)
+    scheduledDate: { type: Date, default: null, index: true }, // planned work start (legacy field name retained)
+    scheduledEndDate: { type: Date, default: null, index: true },
+    plannedMinutes: { type: Number, min: 15, max: 43200, default: 60 }, // up to 30 continuous days
     reminderDate: { type: Date, default: null },
 
     // Approval workflow — employees submit; the approver (project lead / admin) decides.
