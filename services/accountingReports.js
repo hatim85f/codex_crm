@@ -8,6 +8,11 @@ const BankAccount = require("../models/BankAccount");
 const sum = (arr, f) => arr.reduce((s, x) => s + (Number(f(x)) || 0), 0);
 const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+// AED is pegged to USD at a fixed Central Bank of UAE rate (in place since 1997) — safe to
+// hardcode rather than call a live FX service.
+const USD_TO_AED = 3.6725;
+const aed = (amount, currency) => (Number(amount) || 0) * (currency === "USD" ? USD_TO_AED : 1);
+
 function dateClause(field, from, to) {
   if (!from && !to) return {};
   const c = {};
@@ -20,7 +25,7 @@ function dateClause(field, from, to) {
 const COGS_CATEGORIES = ["cogs", "shipping", "courier_delivery"];
 
 async function computeOverview(organization, { from, to, businessLine } = {}) {
-  const invMatch = { organization, status: { $ne: "cancelled" }, ...dateClause("issueDate", from, to) };
+  const invMatch = { organization, status: { $nin: ["draft", "cancelled"] }, ...dateClause("issueDate", from, to) };
   if (businessLine) invMatch.businessLine = businessLine;
   const expMatch = { organization, isDeleted: false, ...dateClause("expenseDate", from, to) };
   if (businessLine) expMatch.businessLine = businessLine;
@@ -29,17 +34,18 @@ async function computeOverview(organization, { from, to, businessLine } = {}) {
   if (businessLine) ecomMatch.businessLine = businessLine;
 
   const [invoices, expenses, ecom, bankCount] = await Promise.all([
-    Invoice.find(invMatch).select("grandTotal paidAmount balance").lean(),
+    Invoice.find(invMatch).select("grandTotal paidAmount balance currency").lean(),
     Expense.find(expMatch).select("aedAmount status").lean(),
     EcommerceOrderProfit.find(ecomMatch).select("aedAmount").lean(),
     BankAccount.countDocuments({ organization, status: "active" }),
   ]);
 
   // Income = client invoices + eCommerce sales (their costs are in the expense ledger).
+  // Invoice amounts are converted to AED per-invoice since currency can be AED or USD.
   const ecomRevenue = round(sum(ecom, (e) => e.aedAmount));
-  const totalIncome = round(sum(invoices, (i) => i.grandTotal) + ecomRevenue);
-  const collected = round(sum(invoices, (i) => i.paidAmount) + ecomRevenue);
-  const outstanding = round(sum(invoices.filter((i) => (i.balance || 0) > 0), (i) => i.balance));
+  const totalIncome = round(sum(invoices, (i) => aed(i.grandTotal, i.currency)) + ecomRevenue);
+  const collected = round(sum(invoices, (i) => aed(i.paidAmount, i.currency)) + ecomRevenue);
+  const outstanding = round(sum(invoices.filter((i) => (i.balance || 0) > 0), (i) => aed(i.balance, i.currency)));
   const outstandingCount = invoices.filter((i) => (i.balance || 0) > 0).length;
   const totalExpenses = round(sum(expenses, (e) => e.aedAmount));
   const pending = expenses.filter((e) => e.status === "pending");
@@ -58,7 +64,7 @@ async function computeOverview(organization, { from, to, businessLine } = {}) {
 }
 
 async function computePnl(organization, { from, to, businessLine } = {}) {
-  const invMatch = { organization, status: { $ne: "cancelled" }, ...dateClause("issueDate", from, to) };
+  const invMatch = { organization, status: { $nin: ["draft", "cancelled"] }, ...dateClause("issueDate", from, to) };
   if (businessLine) invMatch.businessLine = businessLine;
   const expMatch = { organization, isDeleted: false, ...dateClause("expenseDate", from, to) };
   if (businessLine) expMatch.businessLine = businessLine;
@@ -66,12 +72,12 @@ async function computePnl(organization, { from, to, businessLine } = {}) {
   if (businessLine) ecomMatch.businessLine = businessLine;
 
   const [invoices, expenses, ecom] = await Promise.all([
-    Invoice.find(invMatch).select("grandTotal").lean(),
+    Invoice.find(invMatch).select("grandTotal currency").lean(),
     Expense.find(expMatch).select("aedAmount category").lean(),
     EcommerceOrderProfit.find(ecomMatch).select("aedAmount").lean(),
   ]);
 
-  const invoiceRevenue = round(sum(invoices, (i) => i.grandTotal));
+  const invoiceRevenue = round(sum(invoices, (i) => aed(i.grandTotal, i.currency)));
   // eCommerce sales are income; their COSTS are posted to Expenses (services/ecomLedger.js)
   // so we only read revenue here — costs come from the expense ledger below (no double count).
   const ecomRevenue = round(sum(ecom, (e) => e.aedAmount));
@@ -110,7 +116,7 @@ async function auditAutoAvailability(organization, period) {
   const yr = Number(period);
   const range = (yr && yr > 2000) ? { issueDate: { $gte: new Date(yr, 0, 1), $lt: new Date(yr + 1, 0, 1) } } : {};
   const [invCount, paidCount] = await Promise.all([
-    Invoice.countDocuments({ organization, status: { $ne: "cancelled" }, ...range }),
+    Invoice.countDocuments({ organization, status: { $nin: ["draft", "cancelled"] }, ...range }),
     Invoice.countDocuments({ organization, paidAmount: { $gt: 0 }, ...range }),
   ]);
   return {
