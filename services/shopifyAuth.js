@@ -28,4 +28,10 @@ async function getShopifyAccessToken() {
   return cached.token;
 }
 
-module.exports = { getShopifyAccessToken };
+// Drop the cached token — call when Shopify returns 401 (e.g. after releasing
+// a new app version with changed scopes, which invalidates existing tokens).
+function clearShopifyTokenCache() {
+  cached = null;
+}
+
+module.exports = { getShopifyAccessToken, clearShopifyTokenCache };
