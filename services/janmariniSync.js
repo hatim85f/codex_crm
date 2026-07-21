@@ -7,7 +7,7 @@ const Purchase = require("../models/janmarini/Purchase");
 const InboundShipment = require("../models/janmarini/InboundShipment");
 const PendingReceipt = require("../models/janmarini/PendingReceipt");
 const { fetchUnseenReceipts, getConfiguredMailboxes } = require("./janmariniMailbox");
-const { getShopifyAccessToken } = require("./shopifyAuth");
+const { getShopifyAccessToken, clearShopifyTokenCache } = require("./shopifyAuth");
 const { syncCrmProfitRecords } = require("./janmariniCrmSync");
 const { processPendingReceipts } = require("./janmariniReceiptParser");
 
@@ -69,15 +69,29 @@ async function syncShopifyOrders() {
   let cursor = null;
   let hasNextPage = true;
 
+  let activeToken = token;
   while (hasNextPage) {
-    const res = await fetch(`https://${domain}/admin/api/2024-10/graphql.json`, {
+    let res = await fetch(`https://${domain}/admin/api/2024-10/graphql.json`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
+      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": activeToken },
       body: JSON.stringify({
         query: ORDERS_QUERY,
         variables: { query: `created_at:>=${ORDERS_SINCE}`, cursor },
       }),
     });
+    // 401 = cached token invalidated (e.g. new app version released) — refresh once.
+    if (res.status === 401) {
+      clearShopifyTokenCache();
+      activeToken = await getShopifyAccessToken();
+      res = await fetch(`https://${domain}/admin/api/2024-10/graphql.json`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": activeToken },
+        body: JSON.stringify({
+          query: ORDERS_QUERY,
+          variables: { query: `created_at:>=${ORDERS_SINCE}`, cursor },
+        }),
+      });
+    }
     if (!res.ok) throw new Error(`Shopify API error: ${res.status} ${await res.text()}`);
     const body = await res.json();
     if (body.errors) throw new Error(`Shopify GraphQL error: ${JSON.stringify(body.errors)}`);
