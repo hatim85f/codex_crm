@@ -374,6 +374,42 @@ router.post("/stock", employeeAuth, async (req, res) => {
   }
 });
 
+// Edit a stock item. Only fields the stock UI exposes; cost stays owner-only.
+router.put("/stock/:id", employeeAuth, async (req, res) => {
+  try {
+    const decoded = jwt.verify(req.header("x-auth-token"), getEmployeeSecret());
+    const isOwner = decoded.role === "janmarini_owner";
+    const doc = await Purchase.findOne({ _id: req.params.id, isStock: true });
+    if (!doc) return res.status(404).json({ message: "Stock item not found" });
+
+    const { itemName, quantity, shopAndShipTracking, stockNote, costUSD } = req.body || {};
+    if (itemName !== undefined) {
+      if (!String(itemName).trim()) return res.status(400).json({ message: "Item name is required" });
+      doc.itemName = String(itemName).trim();
+    }
+    if (quantity !== undefined) doc.quantity = Number(quantity) || 1;
+    if (shopAndShipTracking !== undefined) doc.shopAndShipTracking = shopAndShipTracking || "";
+    if (stockNote !== undefined) doc.stockNote = stockNote || "";
+    if (costUSD !== undefined && isOwner) doc.costUSD = Number(costUSD) || 0;
+
+    await doc.save();
+    res.json(doc);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+// Delete a stock item (stock records only — never order-linked purchases).
+router.delete("/stock/:id", employeeAuth, async (req, res) => {
+  try {
+    const doc = await Purchase.findOneAndDelete({ _id: req.params.id, isStock: true });
+    if (!doc) return res.status(404).json({ message: "Stock item not found" });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
 // ---- Admin / agent endpoints ----------------------------------------------
 
 function adminAuth(req, res, next) {
