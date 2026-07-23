@@ -275,7 +275,18 @@ async function runDailySync() {
   // cost is included in the same run's profit records.
   const stock = await assignInOfficeStockToOrders().catch((e) => ({ error: e.message }));
   const crm = await syncCrmProfitRecords().catch((e) => ({ error: e.message }));
-  return { shopify, mailbox, aramex, stock, crm };
+  const result = { shopify, mailbox, aramex, stock, crm };
+  const criticalErrors = [];
+  for (const [step, value] of Object.entries({ shopify, mailbox, stock, crm })) {
+    if (value?.error) criticalErrors.push(`${step}: ${value.error}`);
+  }
+  if (mailbox?.errors?.length) {
+    criticalErrors.push(`mailbox: ${mailbox.errors.length} inbox check(s) failed`);
+  }
+  if (mailbox?.parsed?.total > 0 && mailbox.parsed.failed === mailbox.parsed.total) {
+    criticalErrors.push(`parser: all ${mailbox.parsed.total} queued receipt(s) failed`);
+  }
+  return { ...result, ok: criticalErrors.length === 0, criticalErrors };
 }
 
 module.exports = { runDailySync, syncShopifyOrders, syncMailboxReceipts, syncAramexTracking, assignInOfficeStockToOrders };

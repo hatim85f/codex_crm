@@ -21,7 +21,10 @@ const Purchase = require("../models/janmarini/Purchase");
 const InboundShipment = require("../models/janmarini/InboundShipment");
 const PendingReceipt = require("../models/janmarini/PendingReceipt");
 
-const ANTHROPIC_MODEL = process.env.JANMARINI_PARSER_MODEL || "claude-sonnet-5";
+// Use a dated, generally available API model ID. The previous default
+// ("claude-sonnet-5") was not a valid Anthropic Messages API model and caused
+// every queued receipt to fail forever unless Heroku happened to override it.
+const ANTHROPIC_MODEL = process.env.JANMARINI_PARSER_MODEL || "claude-sonnet-4-20250514";
 
 // mariniorders@ now receives BOTH eBay purchase receipts AND Shop&Ship
 // screenshots (Hatim sends everything there) — so unlike the "ebay" and

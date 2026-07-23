@@ -13,6 +13,9 @@ const { runDailySync } = require("../services/janmariniSync");
     await connectDB();
     const result = await runDailySync();
     console.log("[janmarini] Daily sync result:", JSON.stringify(result, null, 2));
+    if (!result.ok) {
+      throw new Error(`Critical sync failure: ${result.criticalErrors.join("; ")}`);
+    }
     process.exitCode = 0;
   } catch (e) {
     console.error("[janmarini] Daily sync failed:", e.message);

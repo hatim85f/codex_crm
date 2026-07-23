@@ -284,7 +284,12 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
 // dashboard only; the employee never sees cost/purchase data.
 router.get("/owner/pending-receipts", ownerAuth, async (req, res) => {
   try {
-    const items = await PendingReceipt.find({ status: "awaiting_confirmation" }).sort({ createdAt: -1 }).lean();
+    const items = await PendingReceipt.find({
+      $or: [
+        { status: "awaiting_confirmation" },
+        { status: "pending", aiNotes: /^Parsing failed/ },
+      ],
+    }).sort({ createdAt: -1 }).lean();
     res.json(items);
   } catch (e) {
     res.status(500).json({ message: e.message });
