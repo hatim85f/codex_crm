@@ -197,12 +197,85 @@ async function syncAramexTracking() {
   return { checked: 0, skipped: true, pendingCount: pending.length };
 }
 
+// Auto-assign in-office stock to open orders that need it. This is the piece
+// that stops the owner having to say "order X's item is already in stock, mark
+// it ready to pack" by hand: when an unfulfilled order has an item with no
+// purchase yet, and a physically-in-office stock record matches that item by
+// name, we consume one unit of stock and create the order-linked Purchase
+// (carrying the stock's cost) at status "in_office" — so the order flips to
+// ready-to-pack and the item's cost flows into the CRM profit sync below.
+//
+// Deliberately conservative to avoid mis-assigning:
+//   - only stock with status "in_office" (we physically have it), qty > 0
+//   - only exact itemName match (case-insensitive, trimmed)
+//   - only order items that have NO purchase yet (never overrides live tracking)
+//   - only unfulfilled, non-ignored orders
+const norm = (s) => (s || "").trim().toLowerCase();
+
+async function assignInOfficeStockToOrders() {
+  const stockItems = await Purchase.find({ isStock: true, status: "in_office", quantity: { $gt: 0 } });
+  if (!stockItems.length) return { assigned: 0, skipped: true };
+
+  const stockByName = new Map(); // normalized itemName -> [stock docs]
+  for (const s of stockItems) {
+    const k = norm(s.itemName);
+    if (!stockByName.has(k)) stockByName.set(k, []);
+    stockByName.get(k).push(s);
+  }
+
+  const openOrders = await ShopifyOrder.find({ ignored: false, fulfilled: { $ne: true } }).lean();
+  let assigned = 0;
+  const details = [];
+
+  for (const order of openOrders) {
+    const existing = await Purchase.find({ orderNumber: order.orderNumber }).select("itemName").lean();
+    const alreadyHave = new Set(existing.map((p) => norm(p.itemName)));
+
+    for (const item of order.items || []) {
+      const key = norm(item.name);
+      if (alreadyHave.has(key)) continue; // order already has a purchase/tracking for this item
+      const pool = stockByName.get(key);
+      if (!pool || !pool.length) continue;
+
+      const stock = pool.find((s) => s.quantity > 0);
+      if (!stock) continue;
+
+      // Consume one unit and create the order-linked purchase carrying the cost.
+      await Purchase.create({
+        orderNumber: order.orderNumber,
+        itemName: stock.itemName,
+        quantity: 1,
+        costUSD: stock.costUSD || 0,
+        status: "in_office",
+        stockNote: `Auto-assigned from stock${stock.stockNote ? ` (${stock.stockNote})` : ""}`,
+      });
+
+      stock.quantity -= 1;
+      if (stock.quantity <= 0) {
+        await Purchase.deleteOne({ _id: stock._id });
+      } else {
+        await stock.save();
+      }
+
+      alreadyHave.add(key);
+      assigned += 1;
+      details.push(`${order.orderNumber} ← ${stock.itemName}`);
+    }
+  }
+
+  if (assigned) console.log(`[janmarini] Auto-assigned ${assigned} stock item(s): ${details.join(", ")}`);
+  return { assigned, skipped: false, details };
+}
+
 async function runDailySync() {
   const shopify = await syncShopifyOrders().catch((e) => ({ error: e.message }));
   const mailbox = await syncMailboxReceipts().catch((e) => ({ error: e.message }));
   const aramex = await syncAramexTracking().catch((e) => ({ error: e.message }));
+  // Run stock auto-assignment BEFORE the CRM sync so any newly-assigned item's
+  // cost is included in the same run's profit records.
+  const stock = await assignInOfficeStockToOrders().catch((e) => ({ error: e.message }));
   const crm = await syncCrmProfitRecords().catch((e) => ({ error: e.message }));
-  return { shopify, mailbox, aramex, crm };
+  return { shopify, mailbox, aramex, stock, crm };
 }
 
-module.exports = { runDailySync, syncShopifyOrders, syncMailboxReceipts, syncAramexTracking };
+module.exports = { runDailySync, syncShopifyOrders, syncMailboxReceipts, syncAramexTracking, assignInOfficeStockToOrders };
