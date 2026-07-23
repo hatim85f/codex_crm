@@ -209,11 +209,24 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
       byOrderNumber.get(p.orderNumber).push(p);
     }
 
+    // One Shop & Ship box (InboundShipment) often carries several items — even
+    // across different orders (e.g. one eBay checkout for #1750 + #1751). Its
+    // fee is a per-BOX charge, so split it across every item sharing the box;
+    // otherwise each item carries the full box fee and a single-item order in a
+    // shared box shows a false loss. Count all purchase lines per shipment.
+    const shipmentShareCount = new Map();
+    for (const p of purchases) {
+      const sid = p.inboundShipment && String(p.inboundShipment._id);
+      if (sid) shipmentShareCount.set(sid, (shipmentShareCount.get(sid) || 0) + 1);
+    }
+
     const view = orders.map((o) => {
       const items = o.items.map((item) => {
         const match = (byOrderNumber.get(o.orderNumber) || []).find(
           (p) => p.itemName.toLowerCase() === item.name.toLowerCase()
         );
+        const shipId = match?.inboundShipment?._id ? String(match.inboundShipment._id) : null;
+        const boxShare = shipId ? shipmentShareCount.get(shipId) || 1 : 1;
         return {
           name: item.name,
           quantity: item.quantity,
@@ -224,7 +237,7 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
           costUSD: match?.costUSD || 0,
           costAED: match?.costUSD ? Math.round(match.costUSD * 3.8 * 100) / 100 : 0,
           aramexTracking: match?.inboundShipment?.snsShipmentNumber || null,
-          shippingFeesAED: match?.inboundShipment?.feesAED || 0,
+          shippingFeesAED: match?.inboundShipment?.feesAED ? round2(match.inboundShipment.feesAED / boxShare) : 0,
           feesPaid: !!match?.inboundShipment?.feesPaid,
           blockedReason: match?.inboundShipment?.blockedReason || "",
           flagNote: match?.flagNote || "",
