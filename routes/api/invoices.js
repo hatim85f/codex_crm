@@ -20,7 +20,7 @@ const { nextDocumentNumber, nextInvoiceNumber, ensureManualNumberAvailable } = r
 const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader", "accountant"];
 const MANAGE = ["owner_admin", "admin"];
 const STATUSES = ["draft", "sent", "partially_paid", "paid", "overdue", "cancelled", "pending_bank_verification"];
-const BODY_FIELDS = ["invoiceNumber", "customerId", "contactId", "quotationId", "status", "issueDate", "dueDate", "currency", "businessLine", "discountType", "discountValue", "paidAmount", "paymentMethod", "paymentTerms", "depositAmount", "paymentLink", "bankAccountId", "bankTransferReceipt", "notes", "terms", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
+const BODY_FIELDS = ["invoiceNumber", "customerId", "contactId", "quotationId", "status", "issueDate", "dueDate", "currency", "businessLine", "discountType", "discountValue", "paidAmount", "paymentMethod", "paymentTerms", "depositAmount", "paymentLink", "bankAccountId", "billingProfileId", "bankTransferReceipt", "notes", "terms", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
 
 router.use(auth);
 router.use(requireRole(...VIEW));
@@ -51,7 +51,7 @@ function buildListQuery(req) {
 
 async function validateCustomerAndContact(req, customerId, contactId) {
   if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) throw new Error("Valid customerId is required");
-  const customer = await Customer.findById(customerId).select("organization displayName");
+  const customer = await Customer.findById(customerId).select("organization displayName billingProfiles");
   if (!customer || String(customer.organization) !== String(req.user.organization)) throw new Error("Customer not found");
   if (contactId) {
     if (!mongoose.Types.ObjectId.isValid(contactId)) throw new Error("Valid contactId is required");
@@ -61,6 +61,28 @@ async function validateCustomerAndContact(req, customerId, contactId) {
     }
   }
   return customer;
+}
+
+// Resolve a customer's named billing profile into the snapshot stored on the invoice.
+// Not a live reference — see the billingSnapshot schema comment.
+function emptyBillingSnapshot() {
+  return { label: "", companyName: "", address: "", taxNumber: "" };
+}
+
+function resolveBillingSnapshot(customer, billingProfileId) {
+  if (!billingProfileId) return { billingProfileId: null, billingSnapshot: emptyBillingSnapshot() };
+  if (!mongoose.Types.ObjectId.isValid(billingProfileId)) throw new Error("Valid billingProfileId is required");
+  const profile = (customer.billingProfiles || []).find((p) => String(p._id) === String(billingProfileId));
+  if (!profile) throw new Error("Billing profile must belong to the selected customer");
+  return {
+    billingProfileId: profile._id,
+    billingSnapshot: {
+      label: profile.label || "",
+      companyName: profile.companyName || "",
+      address: profile.address || "",
+      taxNumber: profile.taxNumber || "",
+    },
+  };
 }
 
 async function validateOptionalRefs(req, bankAccountId, quotationId) {
@@ -121,8 +143,9 @@ async function preparePayload(req, body = {}, existingId = null) {
   if (!body.issueDate) throw new Error("issueDate is required");
   if (!body.currency) throw new Error("currency is required");
   if (!body.businessLine) throw new Error("businessLine is required");
-  await validateCustomerAndContact(req, body.customerId, body.contactId);
+  const customer = await validateCustomerAndContact(req, body.customerId, body.contactId);
   await validateOptionalRefs(req, body.bankAccountId, body.quotationId);
+  const billing = resolveBillingSnapshot(customer, body.billingProfileId);
   if (body.invoiceNumber) await ensureManualNumberAvailable(Invoice, req.user.organization, "invoiceNumber", String(body.invoiceNumber).trim(), existingId);
   const hydratedItems = await hydrateLineItems(req, body.lineItems, body.currency);
   const totals = calculateDocument(hydratedItems, body.discountType, body.discountValue);
@@ -145,6 +168,8 @@ async function preparePayload(req, body = {}, existingId = null) {
     depositAmount: Number(body.depositAmount || 0),
     paymentLink: body.paymentLink || "",
     bankAccountId: body.bankAccountId || null,
+    billingProfileId: billing.billingProfileId,
+    billingSnapshot: billing.billingSnapshot,
     bankTransferReceipt: body.bankTransferReceipt || "",
     notes: body.notes || "",
     terms: body.terms || "",

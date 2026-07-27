@@ -20,7 +20,7 @@ const VIEW = ["owner_admin", "admin", "sales", "marketing", "team_leader"];
 const MANAGE = ["owner_admin", "admin", "team_leader"];
 const DELETE_ROLES = ["owner_admin", "admin"];
 const STATUSES = ["draft", "sent", "accepted", "rejected", "expired", "cancelled", "converted_to_invoice"];
-const BODY_FIELDS = ["quotationNumber", "customerId", "contactId", "status", "issueDate", "validUntil", "currency", "businessLine", "discountType", "discountValue", "notes", "terms", "termsAndConditions", "scopeItems", "timeline", "paymentSchedule", "bankAccountId", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
+const BODY_FIELDS = ["quotationNumber", "customerId", "contactId", "status", "issueDate", "validUntil", "currency", "businessLine", "discountType", "discountValue", "notes", "terms", "termsAndConditions", "scopeItems", "timeline", "paymentSchedule", "bankAccountId", "billingProfileId", "internalNotes", "pdfUrl", "emailSentAt", "lineItems"];
 
 function sanitizeScope(raw) {
   if (!Array.isArray(raw)) return [];
@@ -94,7 +94,7 @@ function buildListQuery(req) {
 
 async function validateCustomerAndContact(req, customerId, contactId) {
   if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) throw new Error("Valid customerId is required");
-  const customer = await Customer.findById(customerId).select("organization displayName");
+  const customer = await Customer.findById(customerId).select("organization displayName billingProfiles");
   if (!customer || String(customer.organization) !== String(req.user.organization)) throw new Error("Customer not found");
   if (contactId) {
     if (!mongoose.Types.ObjectId.isValid(contactId)) throw new Error("Valid contactId is required");
@@ -104,6 +104,28 @@ async function validateCustomerAndContact(req, customerId, contactId) {
     }
   }
   return customer;
+}
+
+// Resolve a customer's named billing profile into the snapshot stored on the
+// quotation/invoice. Not a live reference — see the billingSnapshot schema comment.
+function emptyBillingSnapshot() {
+  return { label: "", companyName: "", address: "", taxNumber: "" };
+}
+
+function resolveBillingSnapshot(customer, billingProfileId) {
+  if (!billingProfileId) return { billingProfileId: null, billingSnapshot: emptyBillingSnapshot() };
+  if (!mongoose.Types.ObjectId.isValid(billingProfileId)) throw new Error("Valid billingProfileId is required");
+  const profile = (customer.billingProfiles || []).find((p) => String(p._id) === String(billingProfileId));
+  if (!profile) throw new Error("Billing profile must belong to the selected customer");
+  return {
+    billingProfileId: profile._id,
+    billingSnapshot: {
+      label: profile.label || "",
+      companyName: profile.companyName || "",
+      address: profile.address || "",
+      taxNumber: profile.taxNumber || "",
+    },
+  };
 }
 
 async function hydrateLineItems(req, rawItems = [], documentCurrency = "AED") {
@@ -140,7 +162,7 @@ async function preparePayload(req, body = {}, existingId = null) {
   if (!body.issueDate) throw new Error("issueDate is required");
   if (!body.currency) throw new Error("currency is required");
   if (!body.businessLine) throw new Error("businessLine is required");
-  await validateCustomerAndContact(req, body.customerId, body.contactId);
+  const customer = await validateCustomerAndContact(req, body.customerId, body.contactId);
   let bankAccountId = null;
   if (body.bankAccountId) {
     if (!mongoose.Types.ObjectId.isValid(body.bankAccountId)) throw new Error("Valid bankAccountId is required");
@@ -148,6 +170,7 @@ async function preparePayload(req, body = {}, existingId = null) {
     if (!bank || String(bank.organization) !== String(req.user.organization)) throw new Error("Bank account not found");
     bankAccountId = body.bankAccountId;
   }
+  const billing = resolveBillingSnapshot(customer, body.billingProfileId);
   if (body.quotationNumber) await ensureManualNumberAvailable(Quotation, req.user.organization, "quotationNumber", String(body.quotationNumber).trim(), existingId);
   const hydratedItems = await hydrateLineItems(req, body.lineItems, body.currency);
   const totals = calculateDocument(hydratedItems, body.discountType, body.discountValue);
@@ -168,6 +191,8 @@ async function preparePayload(req, body = {}, existingId = null) {
     timeline: body.timeline ? String(body.timeline).trim() : "",
     paymentSchedule: sanitizeSchedule(body.paymentSchedule),
     bankAccountId,
+    billingProfileId: billing.billingProfileId,
+    billingSnapshot: billing.billingSnapshot,
     internalNotes: body.internalNotes || "",
     pdfUrl: body.pdfUrl || "",
     emailSentAt: body.emailSentAt || null,
@@ -399,6 +424,8 @@ router.post("/:id/duplicate", requireRole(...MANAGE), async (req, res) => {
       timeline: source.timeline,
       paymentSchedule: source.paymentSchedule.map((s) => (s.toObject ? s.toObject() : s)),
       bankAccountId: source.bankAccountId,
+      billingProfileId: source.billingProfileId || null,
+      billingSnapshot: source.billingSnapshot ? (source.billingSnapshot.toObject ? source.billingSnapshot.toObject() : source.billingSnapshot) : undefined,
       internalNotes: source.internalNotes,
       createdBy: req.user.id,
       updatedBy: req.user.id,
@@ -486,6 +513,9 @@ router.post("/:id/create-invoice", requireRole("owner_admin", "admin"), async (r
       depositAmount: Number(req.body?.depositAmount || 0),
       paymentLink: req.body?.paymentLink || "",
       bankAccountId: req.body?.bankAccountId || null,
+      // A quotation's billing profile (if any) carries over to the invoice it creates.
+      billingProfileId: quotation.billingProfileId || null,
+      billingSnapshot: quotation.billingSnapshot ? (quotation.billingSnapshot.toObject ? quotation.billingSnapshot.toObject() : quotation.billingSnapshot) : undefined,
       bankTransferReceipt: req.body?.bankTransferReceipt || "",
       notes: req.body?.notes || quotation.notes,
       terms: req.body?.terms || quotation.terms,

@@ -62,6 +62,17 @@ const InvoiceSchema = new Schema(
     depositAmount: { type: Number, default: 0, min: 0 },
     paymentLink: { type: String, default: "" },
     bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount", default: null },
+    // Which of the customer's named billing profiles (Customer.billingProfiles) was
+    // selected, kept for reference/audit — not a live reference (see billingSnapshot).
+    billingProfileId: { type: Schema.Types.ObjectId, default: null },
+    // Snapshot of the billing profile captured at creation/edit time so historical
+    // invoices don't retroactively change if the customer's profiles list is edited later.
+    billingSnapshot: {
+      label: { type: String, default: "" },
+      companyName: { type: String, default: "" },
+      address: { type: String, default: "" },
+      taxNumber: { type: String, default: "" },
+    },
     bankTransferReceipt: { type: String, default: "" },
     notes: { type: String, default: "" },
     terms: { type: String, default: "" },

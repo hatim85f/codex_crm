@@ -93,6 +93,17 @@ const QuotationSchema = new Schema(
     timeline: { type: String, default: "" },
     paymentSchedule: { type: [PaymentSlabSchema], default: [] },
     bankAccountId: { type: Schema.Types.ObjectId, ref: "BankAccount", default: null },
+    // Which of the customer's named billing profiles (Customer.billingProfiles) was
+    // selected, kept for reference/audit — not a live reference (see billingSnapshot).
+    billingProfileId: { type: Schema.Types.ObjectId, default: null },
+    // Snapshot of the billing profile captured at creation/edit time so historical
+    // quotations don't retroactively change if the customer's profiles list is edited later.
+    billingSnapshot: {
+      label: { type: String, default: "" },
+      companyName: { type: String, default: "" },
+      address: { type: String, default: "" },
+      taxNumber: { type: String, default: "" },
+    },
     internalNotes: { type: String, default: "" },
     pdfUrl: { type: String, default: "" },
     emailSentAt: { type: Date, default: null },

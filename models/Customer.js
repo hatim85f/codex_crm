@@ -2,6 +2,21 @@ const mongoose = require("mongoose");
 
 const { Schema } = mongoose;
 
+// A customer can have multiple projects that need to be invoiced/quoted to a different
+// billing name/address/TRN (e.g. different subsidiaries of the same client). Each profile
+// gets its own _id (default Mongoose behavior) so it can be selected per quotation/invoice.
+const BillingProfileSchema = new Schema(
+  {
+    label: { type: String, required: true, trim: true }, // e.g. "Project Alpha HQ"
+    companyName: { type: String, default: "" },
+    address: { type: String, default: "" },
+    taxNumber: { type: String, default: "" },
+    contactEmail: { type: String, default: "", lowercase: true, trim: true },
+    contactPhone: { type: String, default: "" },
+  },
+  { timestamps: true }
+);
+
 const CustomerSchema = new Schema(
   {
     organization: { type: Schema.Types.ObjectId, ref: "Organization", index: true, required: true },
@@ -41,6 +56,10 @@ const CustomerSchema = new Schema(
 
     notes: { type: String, default: "" },
     status: { type: String, enum: ["active", "inactive"], default: "active" },
+
+    // Named billing profiles (different subsidiary/project billing name/address/TRN)
+    // that can be picked per quotation/invoice instead of this customer's own tax info.
+    billingProfiles: { type: [BillingProfileSchema], default: [] },
     // Future relationship placeholders (projects/invoices/payments/support/files)
     // are intentionally NOT modeled yet — added in later steps.
   },

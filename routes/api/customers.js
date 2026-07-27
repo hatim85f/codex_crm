@@ -504,4 +504,88 @@ router.post("/:id/contacts/:contactId/resend-activation", requireRole(...MANAGE)
   }
 });
 
+/* ---------------- Billing profiles ---------------- */
+// Named billing profiles (different name/address/TRN per project/subsidiary) that can be
+// picked per quotation/invoice instead of this customer's own tax info. Stored as an
+// embedded array on Customer (own _id per profile via default Mongoose behavior).
+
+// POST /api/customers/:id/billing-profiles
+router.post("/:id/billing-profiles", requireRole(...MANAGE), async (req, res) => {
+  try {
+    const customer = await loadCustomer(req, res);
+    if (!customer) return;
+    const b = req.body || {};
+    if (!b.label) return res.status(400).json({ message: "Label is required" });
+
+    customer.billingProfiles.push({
+      label: String(b.label).trim(),
+      companyName: b.companyName || "",
+      address: b.address || "",
+      taxNumber: b.taxNumber || "",
+      contactEmail: b.contactEmail || "",
+      contactPhone: b.contactPhone || "",
+    });
+    await customer.save();
+    const profile = customer.billingProfiles[customer.billingProfiles.length - 1];
+    logActivity({
+      organization: req.user.organization,
+      customerId: customer._id,
+      type: "billing_profile.added",
+      message: `Billing profile "${profile.label}" added`,
+      actorId: req.user.id,
+    });
+    return res.status(201).json(profile);
+  } catch (err) {
+    console.error("add billing profile error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// load a billing profile under a tenant-scoped customer
+async function loadBillingProfile(req, res) {
+  const customer = await loadCustomer(req, res);
+  if (!customer) return {};
+  const profile = customer.billingProfiles.id(req.params.profileId);
+  if (!profile) {
+    res.status(404).json({ message: "Billing profile not found" });
+    return {};
+  }
+  return { customer, profile };
+}
+
+// PUT /api/customers/:id/billing-profiles/:profileId
+router.put("/:id/billing-profiles/:profileId", requireRole(...MANAGE), async (req, res) => {
+  try {
+    const { customer, profile } = await loadBillingProfile(req, res);
+    if (!profile) return;
+    const b = req.body || {};
+    if (b.label !== undefined && !String(b.label).trim()) {
+      return res.status(400).json({ message: "Label is required" });
+    }
+    ["label", "companyName", "address", "taxNumber", "contactEmail", "contactPhone"].forEach((f) => {
+      if (b[f] !== undefined) profile[f] = f === "label" ? String(b[f]).trim() : b[f];
+    });
+    await customer.save();
+    return res.json(profile);
+  } catch (err) {
+    console.error("edit billing profile error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+// DELETE /api/customers/:id/billing-profiles/:profileId
+router.delete("/:id/billing-profiles/:profileId", requireRole(...MANAGE), async (req, res) => {
+  try {
+    const { customer, profile } = await loadBillingProfile(req, res);
+    if (!profile) return;
+    const profileId = profile._id;
+    profile.deleteOne();
+    await customer.save();
+    return res.json({ ok: true, _id: profileId });
+  } catch (err) {
+    console.error("delete billing profile error:", err.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;
