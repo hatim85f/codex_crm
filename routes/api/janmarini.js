@@ -163,16 +163,8 @@ router.get("/orders", employeeAuth, async (req, res) => {
       byOrderNumber.get(p.orderNumber).push(p);
     }
 
-    const view = orders.map((o) => ({
-      orderNumber: o.orderNumber,
-      customerName: o.customerName,
-      customerPhone: o.customerPhone,
-      customerEmail: o.customerEmail,
-      orderDate: o.orderDate,
-      totalPrice: o.totalPrice,
-      currency: o.currency,
-      fulfilled: !!o.fulfilled,
-      items: o.items.map((item) => {
+    const view = orders.map((o) => {
+      const items = o.items.map((item) => {
         const match = (byOrderNumber.get(o.orderNumber) || []).find(
           (p) => p.itemName.toLowerCase() === item.name.toLowerCase()
         );
@@ -186,8 +178,23 @@ router.get("/orders", employeeAuth, async (req, res) => {
             ? etaNote(match)
             : `Expected ${formatDate(addDays(o.orderDate || new Date(), 10))} - ${formatDate(addDays(o.orderDate || new Date(), 12))}`,
         };
-      }),
-    }));
+      });
+      return {
+        orderNumber: o.orderNumber,
+        customerName: o.customerName,
+        customerPhone: o.customerPhone,
+        customerEmail: o.customerEmail,
+        orderDate: o.orderDate,
+        totalPrice: o.totalPrice,
+        currency: o.currency,
+        fulfilled: !!o.fulfilled,
+        // Order-level list of every distinct Aramex/Shop & Ship tracking number
+        // across the order's items — so the order card can surface it without
+        // making the fulfillment team open every order to find it.
+        aramexTrackings: [...new Set(items.map((i) => i.aramexTracking).filter(Boolean))],
+        items,
+      };
+    });
 
     res.json(view);
   } catch (e) {
@@ -265,6 +272,7 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
         totalPrice: o.totalPrice,
         currency: o.currency,
         fulfilled: !!o.fulfilled,
+        aramexTrackings: [...new Set(items.map((i) => i.aramexTracking).filter(Boolean))],
         totalCostAED,
         totalShippingFeesAED,
         paymentGatewayFeeAED,
