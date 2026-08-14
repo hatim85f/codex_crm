@@ -13,7 +13,7 @@ function requestWebBase(req) {
     || normalizeWebBase(req?.body?.returnBaseUrl)
     || normalizeWebBase(process.env.FRONTEND_URL)
     || normalizeWebBase(process.env.WEB_BASE_URL)
-    || "https://codex-crm-24a42f641a41.herokuapp.com";
+    || "https://codex-system-five.vercel.app";
 }
 
 module.exports = { normalizeWebBase, requestWebBase };
