@@ -30,7 +30,7 @@ const ORDERS_QUERY = `
           phone
           email
           customer { firstName lastName }
-          shippingAddress { address1 address2 city country }
+          shippingAddress { address1 address2 city country phone }
           totalPriceSet { shopMoney { amount currencyCode } }
           displayFulfillmentStatus
           fulfillments(first: 5) { createdAt }
@@ -110,7 +110,13 @@ async function syncShopifyOrders() {
         shopifyOrderId: o.id,
         orderNumber,
         customerName: [o.customer?.firstName, o.customer?.lastName].filter(Boolean).join(" "),
-        customerPhone: o.phone || "",
+        // Shopify keeps an order-level contact phone and a separate
+        // shipping-address phone -- a customer can fill in one without the
+        // other (seen live: "No phone number" under Contact info, but a
+        // real number sitting on the shipping address). Fall back to the
+        // address one so the dashboard doesn't show a blank that Shopify
+        // itself actually has data for.
+        customerPhone: o.phone || o.shippingAddress?.phone || "",
         customerEmail: o.email || "",
         shippingAddress: {
           address1: o.shippingAddress?.address1 || "",
