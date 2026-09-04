@@ -148,6 +148,21 @@ async function processPendingReceipts() {
           ignored += 1;
           continue;
         }
+        if (result.informational) {
+          // Nothing to confirm/apply -- raise it straight as a Notification
+          // instead of putting a reject-only, non-actionable card on the
+          // Confirmations screen.
+          await Notification.create({
+            message: receipt.subject || "eBay notification",
+            type: "informational",
+            source: "ebay",
+            receiptFiles: (receipt.attachments || []).map((a) => a.url),
+          });
+          receipt.status = "processed";
+          await receipt.save();
+          parsed += 1;
+          continue;
+        }
         receipt.aiConfidence = overallConfidence(result.list);
         receipt.aiNotes = result.list.length > 1 ? `Covers ${result.list.length} distinct item(s).` : "";
         receipt.aiParsed = { list: result.list, contentType: "purchase" };
@@ -232,6 +247,7 @@ async function applyOnePurchase(receipt, item) {
       itemName: item.itemName,
       message: `${item.itemName} for order ${item.matchedOrderNumber} has been delivered to the shipping warehouse.`,
       type: "delivered_to_warehouse",
+      source: "ebay",
       receiptFiles: (receipt.attachments || []).map((a) => a.url),
     });
   }

@@ -161,9 +161,10 @@ async function extractPurchaseDeterministic(receipt) {
   }
 
   if (INFORMATIONAL_ONLY_SUBJECT_PATTERNS.some((re) => re.test(subject))) {
-    // Surfaced via the receipt's own subject line on the Confirmations
-    // screen for human attention -- never auto-extracted.
-    return { list: [], contentType: "purchase", ignore: false };
+    // Not a Confirmations-page candidate at all -- there's nothing to
+    // confirm or apply here, only something to be aware of. Raised straight
+    // to Notifications instead (see janmariniReceiptParser.js).
+    return { list: [], contentType: "purchase", ignore: false, informational: true };
   }
 
   if (!isTransactional(subject)) {
