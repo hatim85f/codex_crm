@@ -20,6 +20,7 @@ const ShopifyOrder = require("../models/janmarini/ShopifyOrder");
 const Purchase = require("../models/janmarini/Purchase");
 const InboundShipment = require("../models/janmarini/InboundShipment");
 const PendingReceipt = require("../models/janmarini/PendingReceipt");
+const { extractPurchaseDeterministic, classifyContentTypeDeterministic } = require("./janmariniReceiptParserRules");
 
 // Use a dated, generally available API model ID. The previous default
 // ("claude-sonnet-5") was not a valid Anthropic Messages API model and caused
@@ -31,46 +32,6 @@ const ANTHROPIC_MODEL = process.env.JANMARINI_PARSER_MODEL || "claude-sonnet-4-2
 // "shopandship" mailbox sources, content type can't be inferred from the
 // mailbox alone. This classifies first, then routes to the right extraction
 // tool.
-const CLASSIFY_TOOL = {
-  name: "classify_content",
-  description: "Determine whether this email/attachment is an eBay purchase receipt/confirmation, or a Shop & Ship (Aramex) shipment screenshot.",
-  input_schema: {
-    type: "object",
-    properties: {
-      contentType: { type: "string", enum: ["purchase", "shipment", "unclear"] },
-    },
-    required: ["contentType"],
-  },
-};
-
-const PURCHASE_ITEM_SCHEMA = {
-  type: "object",
-  properties: {
-    matchedOrderNumber: { type: "string", description: "Exact Shopify order number from the candidate list (e.g. '#1760'), or empty string if none match confidently" },
-    itemName: { type: "string", description: "Item name copied EXACTLY (character-for-character) from the matched candidate order's item list — never paraphrase, it's used for an exact-match lookup" },
-    quantity: { type: "number" },
-    costUSD: { type: "number", description: "Total amount paid in USD for this line (not per-unit unless quantity is 1); 0 if not shown" },
-    seller: { type: "string" },
-    ebayOrderNumber: { type: "string" },
-    sellerTracking: { type: "string", description: "Seller/USPS tracking number if present, otherwise empty string" },
-    confidence: { type: "string", enum: ["high", "low"] },
-    notes: { type: "string", description: "Why confidence is low, any ambiguity, or empty string if none" },
-  },
-  required: ["confidence", "notes"],
-};
-
-const PURCHASE_TOOL = {
-  name: "extract_purchases",
-  description: "Extract every distinct eBay purchase/order line item from this receipt or confirmation email so each can be matched to a Shopify order. A single email can cover multiple items/orders bought in one checkout — list ALL of them, not just one.",
-  input_schema: {
-    type: "object",
-    properties: {
-      items: { type: "array", items: PURCHASE_ITEM_SCHEMA, description: "One entry per distinct item/line found. Empty array if nothing extractable." },
-    },
-    required: ["items"],
-  },
-};
-
 const SHIPMENT_ITEM_SCHEMA = {
   type: "object",
   properties: {
@@ -142,11 +103,6 @@ async function callClaude(promptText, attachments, tool) {
   return toolUse.input;
 }
 
-async function buildOrderCandidates() {
-  const orders = await ShopifyOrder.find({ ignored: false }).select("orderNumber items.name").lean();
-  return orders.map((o) => `${o.orderNumber}: ${o.items.map((i) => i.name).join(" / ")}`).join("\n");
-}
-
 async function buildUnlinkedPurchaseCandidates() {
   const purchases = await Purchase.find({ inboundShipment: null }).select("orderNumber itemName seller").lean();
   return purchases.map((p) => `${p.orderNumber}: ${p.itemName} (seller: ${p.seller || "?"})`).join("\n");
@@ -160,14 +116,6 @@ function basePromptLines(receipt) {
   ];
 }
 
-// mariniorders@ receives both eBay bills and Shop&Ship screenshots now, so
-// content type can't be assumed from the mailbox — ask the model first.
-async function classifyContentType(receipt) {
-  const promptText = [...basePromptLines(receipt), "", "Is this an eBay purchase receipt/confirmation, or a Shop & Ship shipment screenshot/update?"].join("\n");
-  const result = await callClaude(promptText, receipt.attachments, CLASSIFY_TOOL);
-  return result.contentType;
-}
-
 function overallConfidence(list) {
   return list.length && list.every((x) => x.confidence === "high") ? "high" : "low";
 }
@@ -179,33 +127,51 @@ async function processPendingReceipts() {
   const pending = await PendingReceipt.find({ status: "pending" });
   let parsed = 0;
   let failed = 0;
+  let ignored = 0;
 
   for (const receipt of pending) {
     try {
       let isShipment;
       if (receipt.source === "shopandship") isShipment = true;
       else if (receipt.source === "ebay") isShipment = false;
-      else isShipment = (await classifyContentType(receipt)) === "shipment"; // "mariniorders" — ambiguous, classify
+      else isShipment = classifyContentTypeDeterministic(receipt) === "shipment"; // "mariniorders" — ambiguous, classify
 
-      const candidates = isShipment ? await buildUnlinkedPurchaseCandidates() : await buildOrderCandidates();
+      if (!isShipment) {
+        // Deterministic path -- no Anthropic API call, no billing dependency.
+        // See janmariniReceiptParserRules.js for why.
+        const result = await extractPurchaseDeterministic(receipt);
+        if (result.ignore) {
+          receipt.status = "ignored";
+          receipt.aiNotes = "Auto-ignored: promotional/closed-case notification, not a purchase receipt.";
+          await receipt.save();
+          ignored += 1;
+          continue;
+        }
+        receipt.aiConfidence = overallConfidence(result.list);
+        receipt.aiNotes = result.list.length > 1 ? `Covers ${result.list.length} distinct item(s).` : "";
+        receipt.aiParsed = { list: result.list, contentType: "purchase" };
+        receipt.status = "awaiting_confirmation";
+        await receipt.save();
+        parsed += 1;
+        continue;
+      }
+
+      // Shop & Ship content is screenshots -- reading numbers off an image
+      // still genuinely needs vision AI, unlike eBay's text-based emails.
+      const candidates = await buildUnlinkedPurchaseCandidates();
       const promptText = [
         ...basePromptLines(receipt),
         "",
-        isShipment
-          ? `Candidate purchases awaiting a shipment (orderNumber: item, seller):\n${candidates || "(none)"}`
-          : `Candidate Shopify orders (orderNumber: items):\n${candidates || "(none)"}`,
+        `Candidate purchases awaiting a shipment (orderNumber: item, seller):\n${candidates || "(none)"}`,
         "",
         "List EVERY distinct item/box found, not just one — a single email can cover several. Only set an individual entry's confidence to 'high' if you are certain of its match; use 'low' and explain in its notes if ambiguous.",
       ].join("\n");
 
-      const result = isShipment
-        ? await callClaude(promptText, receipt.attachments, SHIPMENT_TOOL)
-        : await callClaude(promptText, receipt.attachments, PURCHASE_TOOL);
-
-      const list = isShipment ? result.shipments || [] : result.items || [];
+      const result = await callClaude(promptText, receipt.attachments, SHIPMENT_TOOL);
+      const list = result.shipments || [];
       receipt.aiConfidence = overallConfidence(list);
-      receipt.aiNotes = list.length > 1 ? `Covers ${list.length} distinct ${isShipment ? "shipment box(es)" : "item(s)"}.` : "";
-      receipt.aiParsed = { list, contentType: isShipment ? "shipment" : "purchase" };
+      receipt.aiNotes = list.length > 1 ? `Covers ${list.length} distinct shipment box(es).` : "";
+      receipt.aiParsed = { list, contentType: "shipment" };
       receipt.status = "awaiting_confirmation";
       await receipt.save();
       parsed += 1;
@@ -223,7 +189,7 @@ async function processPendingReceipts() {
     }
   }
 
-  return { total: pending.length, parsed, failed };
+  return { total: pending.length, parsed, failed, ignored };
 }
 
 async function applyOnePurchase(receipt, item) {

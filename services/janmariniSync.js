@@ -100,7 +100,7 @@ async function syncShopifyOrders() {
     for (const { node: o } of edges) {
       const orderNumber = o.name; // already "#1750"-style
       const money = o.totalPriceSet?.shopMoney;
-      const existing = await ShopifyOrder.findOne({ shopifyOrderId: o.id }).select("fulfilled");
+      const existing = await ShopifyOrder.findOne({ shopifyOrderId: o.id }).select("fulfilled ignored");
       // Reconciliation safety net: the webhook usually flips `fulfilled` the moment
       // an order is fulfilled in Shopify, but this catches it too if the webhook
       // was missed/down — either path moves the order into the app's History tab.
@@ -121,7 +121,9 @@ async function syncShopifyOrders() {
         orderDate: o.createdAt ? new Date(o.createdAt) : null,
         totalPrice: Number(money?.amount) || 0,
         currency: money?.currencyCode || "AED",
-        ignored: IGNORED_ORDER_NUMBERS.includes(orderNumber),
+        // Preserve a manually-set ignore flag (e.g. cancelled/restocked orders) across
+        // re-syncs -- only the hardcoded list or the existing DB value can turn it on.
+        ignored: IGNORED_ORDER_NUMBERS.includes(orderNumber) || existing?.ignored || false,
         items: o.lineItems.edges.map(({ node: li }) => ({
           name: li.name,
           quantity: li.quantity,
@@ -135,8 +137,14 @@ async function syncShopifyOrders() {
       }
       await ShopifyOrder.findOneAndUpdate({ shopifyOrderId: o.id }, update, { upsert: true, new: true });
       if (newlyFulfilled) {
-        await Purchase.updateMany({ orderNumber }, { status: "delivered" });
         reconciledFulfilled += 1;
+      }
+      // Re-applied on every sync (not just the fulfillment transition) so a Purchase
+      // record created/corrected after the order was already fulfilled -- a late
+      // tracking match, a manual DB fix -- still gets flipped to delivered instead
+      // of being stuck showing its last in-transit status in History forever.
+      if (shopifyFulfilled) {
+        await Purchase.updateMany({ orderNumber, status: { $ne: "delivered" } }, { status: "delivered" });
       }
       synced += 1;
     }
