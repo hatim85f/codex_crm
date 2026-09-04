@@ -32,11 +32,22 @@ const TRANSACTIONAL_SUBJECT_PATTERNS = [
   /tracking/i,
 ];
 
-// Shown to the owner (subject line carries the real signal, e.g. a seller
-// warning about a delay) but never auto-extracted into a purchase -- a
-// message isn't a receipt, and guessing at cost/order from free-text chat is
-// exactly the kind of thing that produces wrong data.
-const SELLER_MESSAGE_SUBJECT_RE = /sent a message about/i;
+// Shown to the owner (subject line carries the real signal -- a seller
+// warning about a delay, an order being cancelled, a refund issued) but
+// never auto-extracted into a purchase. These aren't receipts, and applying
+// one would risk exactly the bug seen live: a cancellation email's "similar
+// items" footer matched an unrelated open order's item name, which would
+// have recorded it as purchased for the cancelled item's refund amount.
+// Visibility without extraction is the point -- the owner needs to see a
+// cancellation happened, but the system should never guess a purchase out of
+// free-text chat or a refund notice.
+const INFORMATIONAL_ONLY_SUBJECT_PATTERNS = [
+  /sent a message about/i,
+  /has been cancel/i,
+  /order cancel/i,
+  /refund is on its way/i,
+  /refund/i,
+];
 
 // Explicit noise this mailbox reliably contains -- kept as a fast-path even
 // though the primary safety net is now the allowlist above.
@@ -49,14 +60,6 @@ const IGNORE_SUBJECT_PATTERNS = [
   /newsletter/i,
   /price dropped/i,
   /was\s*\$?\s*[\d.,]+,?\s*now/i, // "Was $62.00 now $52.70" / "Was AED113.99, Now AED3.81" promo style
-  // Cancellations/refunds are not purchase confirmations -- applying one
-  // would wrongly record a cancelled item as bought/received. Seen live: a
-  // cancellation email's "similar items" footer matched an unrelated open
-  // order's item name, which would have recorded it as purchased for the
-  // cancelled item's refund amount.
-  /has been cancel/i,
-  /order cancel/i,
-  /refund is on its way/i,
 ];
 
 // eBay's own emails routinely end with a "SIMILAR ITEMS" / related-products
@@ -147,7 +150,7 @@ async function extractPurchaseDeterministic(receipt) {
     return { list: [], contentType: "purchase", ignore: true };
   }
 
-  if (SELLER_MESSAGE_SUBJECT_RE.test(subject)) {
+  if (INFORMATIONAL_ONLY_SUBJECT_PATTERNS.some((re) => re.test(subject))) {
     // Surfaced via the receipt's own subject line on the Confirmations
     // screen for human attention -- never auto-extracted.
     return { list: [], contentType: "purchase", ignore: false };
