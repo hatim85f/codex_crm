@@ -21,16 +21,26 @@
 const ShopifyOrder = require("../models/janmarini/ShopifyOrder");
 
 // Subjects worth attempting item extraction on -- genuine order-lifecycle
-// transactional emails.
+// transactional emails. Grouped by what stage of the lifecycle they signal
+// (checked in this priority order) so a Notification can be raised for the
+// milestone that actually matters: an item reaching the ship-to warehouse
+// (Shipito or otherwise -- every eBay purchase here ships to a forwarder
+// address, so eBay's own "delivered" IS "delivered to warehouse").
+const DELIVERED_SUBJECT_PATTERNS = [/order delivered/i];
+const SHIPPED_SUBJECT_PATTERNS = [/package is now with its carrier/i, /has shipped/i, /\bshipped\b/i, /tracking/i];
+const CONFIRMED_SUBJECT_PATTERNS = [/order (is )?confirmed/i, /order update/i];
+
 const TRANSACTIONAL_SUBJECT_PATTERNS = [
-  /order (is )?confirmed/i,
-  /order update/i,
-  /order delivered/i,
-  /package is now with its carrier/i,
-  /has shipped/i,
-  /\bshipped\b/i,
-  /tracking/i,
+  ...DELIVERED_SUBJECT_PATTERNS,
+  ...SHIPPED_SUBJECT_PATTERNS,
+  ...CONFIRMED_SUBJECT_PATTERNS,
 ];
+
+function classifyEventType(subject) {
+  if (DELIVERED_SUBJECT_PATTERNS.some((re) => re.test(subject))) return "delivered";
+  if (SHIPPED_SUBJECT_PATTERNS.some((re) => re.test(subject))) return "shipped";
+  return "confirmed";
+}
 
 // Shown to the owner (subject line carries the real signal -- a seller
 // warning about a delay, an order being cancelled, a refund issued) but
@@ -168,6 +178,7 @@ async function extractPurchaseDeterministic(receipt) {
   }
 
   const ebayOrderNumber = extractOrderNumber(strippedBody || subject);
+  const eventType = classifyEventType(subject);
   // More than one distinct item matched in the same email -- don't guess
   // which one the order number belongs to.
   const ambiguous = uniqueMatches.length > 1;
@@ -181,6 +192,7 @@ async function extractPurchaseDeterministic(receipt) {
     ebayOrderNumber: ambiguous ? "" : ebayOrderNumber,
     sellerTracking: "",
     confidence: ambiguous ? "low" : "high",
+    eventType,
     notes: ambiguous
       ? `Email text matched ${uniqueMatches.length} different open orders' items -- confirm the right one manually.`
       : "",

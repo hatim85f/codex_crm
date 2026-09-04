@@ -13,6 +13,7 @@ const ShopifyOrder = require("../../models/janmarini/ShopifyOrder");
 const Purchase = require("../../models/janmarini/Purchase");
 const InboundShipment = require("../../models/janmarini/InboundShipment");
 const PendingReceipt = require("../../models/janmarini/PendingReceipt");
+const Notification = require("../../models/janmarini/Notification");
 const { runDailySync } = require("../../services/janmariniSync");
 const { fulfillShopifyOrder } = require("../../services/shopifyFulfillment");
 const { confirmPendingReceipt, rejectPendingReceipt } = require("../../services/janmariniReceiptParser");
@@ -321,6 +322,39 @@ router.post("/owner/pending-receipts/:id/reject", ownerAuth, async (req, res) =>
   try {
     const doc = await rejectPendingReceipt(req.params.id);
     res.json(doc);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+// Notifications: raised automatically when a confirmed purchase receipt
+// indicates an item reached the ship-to warehouse (see
+// janmariniReceiptParser.js applyOnePurchase). Read-only display list plus
+// read/unread state -- owner dashboard only.
+router.get("/owner/notifications", ownerAuth, async (req, res) => {
+  try {
+    const items = await Notification.find({}).sort({ createdAt: -1 }).limit(200).lean();
+    const unreadCount = await Notification.countDocuments({ read: false });
+    res.json({ items, unreadCount });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+router.post("/owner/notifications/:id/read", ownerAuth, async (req, res) => {
+  try {
+    const doc = await Notification.findByIdAndUpdate(req.params.id, { read: true }, { new: true });
+    if (!doc) return res.status(404).json({ message: "Notification not found" });
+    res.json(doc);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+router.post("/owner/notifications/mark-all-read", ownerAuth, async (req, res) => {
+  try {
+    await Notification.updateMany({ read: false }, { read: true });
+    res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ message: e.message });
   }

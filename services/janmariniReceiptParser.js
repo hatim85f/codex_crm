@@ -20,6 +20,7 @@ const ShopifyOrder = require("../models/janmarini/ShopifyOrder");
 const Purchase = require("../models/janmarini/Purchase");
 const InboundShipment = require("../models/janmarini/InboundShipment");
 const PendingReceipt = require("../models/janmarini/PendingReceipt");
+const Notification = require("../models/janmarini/Notification");
 const { extractPurchaseDeterministic, classifyContentTypeDeterministic } = require("./janmariniReceiptParserRules");
 
 // Use a dated, generally available API model ID. The previous default
@@ -224,6 +225,17 @@ async function applyOnePurchase(receipt, item) {
       receiptFiles: (receipt.attachments || []).map((a) => a.url),
     });
   }
+
+  if (item.eventType === "delivered") {
+    await Notification.create({
+      orderNumber: item.matchedOrderNumber,
+      itemName: item.itemName,
+      message: `${item.itemName} for order ${item.matchedOrderNumber} has been delivered to the shipping warehouse.`,
+      type: "delivered_to_warehouse",
+      receiptFiles: (receipt.attachments || []).map((a) => a.url),
+    });
+  }
+
   return { ok: true };
 }
 
