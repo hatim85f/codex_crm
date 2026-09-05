@@ -360,6 +360,24 @@ router.post("/owner/notifications/mark-all-read", ownerAuth, async (req, res) =>
   }
 });
 
+// Manual "Sync Now" button — runs the same job the Heroku Scheduler fires
+// daily (Shopify orders + mailbox receipts + Aramex tracking + stock
+// auto-assignment + CRM profit records), on demand instead of waiting for
+// the next scheduled run.
+let syncInProgress = false;
+router.post("/owner/sync-now", ownerAuth, async (req, res) => {
+  if (syncInProgress) return res.status(409).json({ message: "A sync is already running, try again shortly" });
+  syncInProgress = true;
+  try {
+    const result = await runDailySync();
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  } finally {
+    syncInProgress = false;
+  }
+});
+
 // Employee marks an order as packed/handed over. Fulfills it in Shopify too
 // (so both systems agree), attaching Aramex tracking if we already have one.
 router.post("/orders/:orderNumber/fulfill", employeeAuth, async (req, res) => {
