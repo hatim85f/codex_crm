@@ -84,6 +84,12 @@ function ownerAuth(req, res, next) {
 // least-advanced — "fees paid" and "at destination" are independent signals
 // (fees can be paid before the parcel even reaches customs), so priority
 // matters here, not just a straight status lookup.
+// "shopandship" is the historical default (Aramex's own personal-shopper
+// service) -- "dhl" is the newer direct-waybill path, see services/dhlTracking.js.
+function carrierLabel(carrier) {
+  return carrier === "dhl" ? "DHL" : "Aramex";
+}
+
 function rawStatus(purchase) {
   if (purchase.status === "delivered") return "delivered";
   const shipment = purchase.inboundShipment;
@@ -155,7 +161,7 @@ router.get("/orders", employeeAuth, async (req, res) => {
   try {
     const orders = await ShopifyOrder.find({ ignored: false }).sort({ orderDate: -1 }).lean();
     const purchases = await Purchase.find({ orderNumber: { $in: orders.map((o) => o.orderNumber) } })
-      .populate("inboundShipment", "status snsShipmentNumber feesPaid feesPaidDate atDestinationDate blockedReason lastTrackingCheck")
+      .populate("inboundShipment", "status snsShipmentNumber carrier feesPaid feesPaidDate atDestinationDate blockedReason lastTrackingCheck")
       .lean();
 
     const byOrderNumber = new Map();
@@ -175,6 +181,7 @@ router.get("/orders", employeeAuth, async (req, res) => {
           image: item.image,
           status: match ? displayStatus(match) : "ordered",
           aramexTracking: match?.inboundShipment?.snsShipmentNumber || null,
+          trackingCarrier: match?.inboundShipment?.carrier || "shopandship",
           etaNote: match
             ? etaNote(match)
             : `Expected ${formatDate(addDays(o.orderDate || new Date(), 10))} - ${formatDate(addDays(o.orderDate || new Date(), 12))}`,
@@ -190,10 +197,12 @@ router.get("/orders", employeeAuth, async (req, res) => {
         totalPrice: o.totalPrice,
         currency: o.currency,
         fulfilled: !!o.fulfilled,
-        // Order-level list of every distinct Aramex/Shop & Ship tracking number
-        // across the order's items — so the order card can surface it without
+        // Order-level list of every distinct courier tracking number across
+        // the order's items — so the order card can surface it without
         // making the fulfillment team open every order to find it.
-        aramexTrackings: [...new Set(items.map((i) => i.aramexTracking).filter(Boolean))],
+        trackingBadges: [...new Map(
+          items.filter((i) => i.aramexTracking).map((i) => [i.aramexTracking, `${carrierLabel(i.trackingCarrier)}: ${i.aramexTracking}`])
+        ).values()],
         items,
       };
     });
@@ -210,7 +219,7 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
   try {
     const orders = await ShopifyOrder.find({ ignored: false }).sort({ orderDate: -1 }).lean();
     const purchases = await Purchase.find({ orderNumber: { $in: orders.map((o) => o.orderNumber) } })
-      .populate("inboundShipment", "status snsShipmentNumber feesAED feesPaid feesPaidDate atDestinationDate blockedReason lastTrackingCheck")
+      .populate("inboundShipment", "status snsShipmentNumber carrier feesAED feesPaid feesPaidDate atDestinationDate blockedReason lastTrackingCheck")
       .lean();
 
     const byOrderNumber = new Map();
@@ -247,6 +256,7 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
           costUSD: match?.costUSD || 0,
           costAED: match?.costUSD ? Math.round(match.costUSD * 3.8 * 100) / 100 : 0,
           aramexTracking: match?.inboundShipment?.snsShipmentNumber || null,
+          trackingCarrier: match?.inboundShipment?.carrier || "shopandship",
           shippingFeesAED: match?.inboundShipment?.feesAED ? round2(match.inboundShipment.feesAED / boxShare) : 0,
           feesPaid: !!match?.inboundShipment?.feesPaid,
           blockedReason: match?.inboundShipment?.blockedReason || "",
@@ -275,7 +285,9 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
         totalPrice: o.totalPrice,
         currency: o.currency,
         fulfilled: !!o.fulfilled,
-        aramexTrackings: [...new Set(items.map((i) => i.aramexTracking).filter(Boolean))],
+        trackingBadges: [...new Map(
+          items.filter((i) => i.aramexTracking).map((i) => [i.aramexTracking, `${carrierLabel(i.trackingCarrier)}: ${i.aramexTracking}`])
+        ).values()],
         totalCostAED,
         totalShippingFeesAED,
         paymentGatewayFeeAED,
