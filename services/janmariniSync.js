@@ -34,6 +34,7 @@ const ORDERS_QUERY = `
           shippingAddress { address1 address2 city country phone }
           totalPriceSet { shopMoney { amount currencyCode } }
           displayFulfillmentStatus
+          cancelledAt
           fulfillments(first: 5) { createdAt }
           lineItems(first: 50) {
             edges {
@@ -128,9 +129,11 @@ async function syncShopifyOrders() {
         orderDate: o.createdAt ? new Date(o.createdAt) : null,
         totalPrice: Number(money?.amount) || 0,
         currency: money?.currencyCode || "AED",
-        // Preserve a manually-set ignore flag (e.g. cancelled/restocked orders) across
-        // re-syncs -- only the hardcoded list or the existing DB value can turn it on.
-        ignored: IGNORED_ORDER_NUMBERS.includes(orderNumber) || existing?.ignored || false,
+        // Cancelled orders auto-hide (Shopify's own cancelledAt is authoritative).
+        // A manual ignore flag (e.g. a refunded-but-not-cancelled order) or the
+        // hardcoded legacy list is preserved across re-syncs either way -- once
+        // true, only a human un-ignoring it in the DB turns it back off.
+        ignored: !!o.cancelledAt || IGNORED_ORDER_NUMBERS.includes(orderNumber) || existing?.ignored || false,
         items: o.lineItems.edges.map(({ node: li }) => ({
           name: li.name,
           quantity: li.quantity,
@@ -316,25 +319,25 @@ async function assignInOfficeStockToOrders() {
   return { assigned, skipped: false, details };
 }
 
+// Deliberately NOT calling syncMailboxReceipts here anymore (Sep 2026): the
+// eBay-email auto-matching kept mis-linking or missing purchases (wrong item
+// name matches, cancelled items still showing as needed, name-mismatch bugs),
+// which caused more confusion than it saved. Purchases are now assigned to
+// orders manually from eBay bills instead -- see conversation history for
+// context. syncMailboxReceipts/processPendingReceipts are left in place
+// (unused) in case this gets revisited later.
 async function runDailySync() {
   const shopify = await syncShopifyOrders().catch((e) => ({ error: e.message }));
-  const mailbox = await syncMailboxReceipts().catch((e) => ({ error: e.message }));
   const aramex = await syncAramexTracking().catch((e) => ({ error: e.message }));
   const dhl = await syncDhlTracking().catch((e) => ({ error: e.message }));
   // Run stock auto-assignment BEFORE the CRM sync so any newly-assigned item's
   // cost is included in the same run's profit records.
   const stock = await assignInOfficeStockToOrders().catch((e) => ({ error: e.message }));
   const crm = await syncCrmProfitRecords().catch((e) => ({ error: e.message }));
-  const result = { shopify, mailbox, aramex, dhl, stock, crm };
+  const result = { shopify, aramex, dhl, stock, crm };
   const criticalErrors = [];
-  for (const [step, value] of Object.entries({ shopify, mailbox, stock, crm })) {
+  for (const [step, value] of Object.entries({ shopify, stock, crm })) {
     if (value?.error) criticalErrors.push(`${step}: ${value.error}`);
-  }
-  if (mailbox?.errors?.length) {
-    criticalErrors.push(`mailbox: ${mailbox.errors.length} inbox check(s) failed`);
-  }
-  if (mailbox?.parsed?.total > 0 && mailbox.parsed.failed === mailbox.parsed.total) {
-    criticalErrors.push(`parser: all ${mailbox.parsed.total} queued receipt(s) failed`);
   }
   return { ...result, ok: criticalErrors.length === 0, criticalErrors };
 }
