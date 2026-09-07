@@ -10,6 +10,7 @@ const { fetchUnseenReceipts, getConfiguredMailboxes } = require("./janmariniMail
 const { getShopifyAccessToken, clearShopifyTokenCache } = require("./shopifyAuth");
 const { syncCrmProfitRecords } = require("./janmariniCrmSync");
 const { processPendingReceipts } = require("./janmariniReceiptParser");
+const { trackDhlShipment, mapDhlStatusToInternal } = require("./dhlTracking");
 
 const IGNORED_ORDER_NUMBERS = ["#1760", "#1761", "#1762", "#1754", "#1766"];
 
@@ -206,9 +207,43 @@ async function syncMailboxReceipts() {
 // once we have API credentials, poll here for every InboundShipment not yet
 // "Delivered-to-office" and update `status` + `lastTrackingCheck`.
 async function syncAramexTracking() {
-  const pending = await InboundShipment.find({ status: { $ne: "Delivered-to-office" } }).select("_id");
+  const pending = await InboundShipment.find({
+    status: { $ne: "Delivered-to-office" },
+    carrier: { $ne: "dhl" },
+  }).select("_id");
   console.warn(`[janmarini] Aramex tracking sync not yet implemented — ${pending.length} shipment(s) awaiting status`);
   return { checked: 0, skipped: true, pendingCount: pending.length };
+}
+
+// DHL Shipment Tracking - Unified API (free tier: 250 calls/day, 1 call per
+// 5s). One InboundShipment = one DHL waybill number stored in
+// snsShipmentNumber. Only ever moves status forward based on what DHL
+// reports -- never guesses on "failure"/"unknown" responses.
+async function syncDhlTracking() {
+  const shipments = await InboundShipment.find({ carrier: "dhl", status: { $ne: "Delivered-to-office" } });
+  if (!shipments.length) return { checked: 0, updated: 0, skipped: true };
+
+  let updated = 0;
+  const errors = [];
+  for (const shipment of shipments) {
+    try {
+      const result = await trackDhlShipment(shipment.snsShipmentNumber);
+      shipment.lastTrackingCheck = new Date();
+      const newStatus = mapDhlStatusToInternal(result);
+      if (newStatus && newStatus !== shipment.status) {
+        shipment.status = newStatus;
+        if (newStatus === "At Destination" && !shipment.atDestinationDate) shipment.atDestinationDate = new Date();
+        if (newStatus === "Delivered-to-office" && !shipment.deliveredDate) shipment.deliveredDate = new Date();
+      }
+      await shipment.save();
+      updated += 1;
+    } catch (e) {
+      errors.push(`${shipment.snsShipmentNumber}: ${e.message}`);
+    }
+    // Stay well under DHL's 1-call-per-5-seconds limit.
+    await new Promise((r) => setTimeout(r, 5100));
+  }
+  return { checked: shipments.length, updated, errors, skipped: false };
 }
 
 // Auto-assign in-office stock to open orders that need it. This is the piece
@@ -285,11 +320,12 @@ async function runDailySync() {
   const shopify = await syncShopifyOrders().catch((e) => ({ error: e.message }));
   const mailbox = await syncMailboxReceipts().catch((e) => ({ error: e.message }));
   const aramex = await syncAramexTracking().catch((e) => ({ error: e.message }));
+  const dhl = await syncDhlTracking().catch((e) => ({ error: e.message }));
   // Run stock auto-assignment BEFORE the CRM sync so any newly-assigned item's
   // cost is included in the same run's profit records.
   const stock = await assignInOfficeStockToOrders().catch((e) => ({ error: e.message }));
   const crm = await syncCrmProfitRecords().catch((e) => ({ error: e.message }));
-  const result = { shopify, mailbox, aramex, stock, crm };
+  const result = { shopify, mailbox, aramex, dhl, stock, crm };
   const criticalErrors = [];
   for (const [step, value] of Object.entries({ shopify, mailbox, stock, crm })) {
     if (value?.error) criticalErrors.push(`${step}: ${value.error}`);
@@ -303,4 +339,4 @@ async function runDailySync() {
   return { ...result, ok: criticalErrors.length === 0, criticalErrors };
 }
 
-module.exports = { runDailySync, syncShopifyOrders, syncMailboxReceipts, syncAramexTracking, assignInOfficeStockToOrders };
+module.exports = { runDailySync, syncShopifyOrders, syncMailboxReceipts, syncAramexTracking, syncDhlTracking, assignInOfficeStockToOrders };

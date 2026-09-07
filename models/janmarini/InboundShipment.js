@@ -15,6 +15,10 @@ const STATUSES = ["At Origin", "In Transit", "At Customs", "At Destination", "De
 const InboundShipmentSchema = new Schema(
   {
     snsShipmentNumber: { type: String, required: true, unique: true, index: true },
+    // Which courier this tracking number belongs to, so the sync job knows
+    // which API to poll. "shopandship" (Aramex) has no public tracking API
+    // yet (see syncAramexTracking) -- "dhl" polls DHL's Shipment Tracking API.
+    carrier: { type: String, enum: ["shopandship", "dhl"], default: "shopandship" },
     seller: { type: String, default: "" }, // primary seller for this box, for quick reference
     weight: { type: Number, default: 0 },
     feesAED: { type: Number, default: 0 }, // never exposed to employee dashboard
