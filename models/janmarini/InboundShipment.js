@@ -21,7 +21,17 @@ const InboundShipmentSchema = new Schema(
     carrier: { type: String, enum: ["shopandship", "dhl"], default: "shopandship" },
     seller: { type: String, default: "" }, // primary seller for this box, for quick reference
     weight: { type: Number, default: 0 },
-    feesAED: { type: Number, default: 0 }, // never exposed to employee dashboard
+    // Two separate legs of freight cost, kept as their own fields for an
+    // honest audit trail (Shipito's consolidation/freight invoice is in USD;
+    // the courier -- DHL today, Aramex/Shop & Ship historically -- bills the
+    // last-mile/customs leg in AED). `feesAED` is auto-derived from both (see
+    // pre-save hook below) and stays the single number every downstream
+    // consumer (owner dashboard's per-item shipping cost, the Codex CRM
+    // profit sync) already reads -- so both fees flow into both systems
+    // without either one having to know this split exists.
+    shipitoFeeUSD: { type: Number, default: 0 },
+    courierFeeAED: { type: Number, default: 0 },
+    feesAED: { type: Number, default: 0 }, // never exposed to employee dashboard — derived, don't set directly
     feesPaid: { type: Boolean, default: false }, // fees can be paid before customs is even reached — independent of `status`
     status: { type: String, enum: STATUSES, default: "At Origin", index: true },
     lastTrackingCheck: { type: Date, default: null },
@@ -43,6 +53,33 @@ const InboundShipmentSchema = new Schema(
   },
   { timestamps: true }
 );
+
+const AED_PER_USD = 3.8; // matches the CRM's own conversion constant (janmariniCrmSync.js)
+function deriveFeesAED(courierFeeAED, shipitoFeeUSD) {
+  return Math.round((Number(courierFeeAED || 0) + Number(shipitoFeeUSD || 0) * AED_PER_USD) * 100) / 100;
+}
+
+InboundShipmentSchema.pre("save", function (next) {
+  if (this.isModified("shipitoFeeUSD") || this.isModified("courierFeeAED")) {
+    this.feesAED = deriveFeesAED(this.courierFeeAED, this.shipitoFeeUSD);
+  }
+  next();
+});
+
+// findOneAndUpdate/findByIdAndUpdate bypass document middleware entirely --
+// this is the query-level equivalent, needed because admin/shipments (and
+// most of the ad-hoc scripts used to manage shipments so far) update this
+// way rather than via .save().
+InboundShipmentSchema.pre("findOneAndUpdate", async function (next) {
+  const update = this.getUpdate() || {};
+  const touchesFees = "shipitoFeeUSD" in update || "courierFeeAED" in update;
+  if (!touchesFees) return next();
+  const existing = await this.model.findOne(this.getQuery()).select("shipitoFeeUSD courierFeeAED").lean();
+  const shipitoFeeUSD = "shipitoFeeUSD" in update ? update.shipitoFeeUSD : existing?.shipitoFeeUSD;
+  const courierFeeAED = "courierFeeAED" in update ? update.courierFeeAED : existing?.courierFeeAED;
+  update.feesAED = deriveFeesAED(courierFeeAED, shipitoFeeUSD);
+  next();
+});
 
 InboundShipmentSchema.statics.STATUSES = STATUSES;
 

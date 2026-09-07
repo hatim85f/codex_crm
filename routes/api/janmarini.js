@@ -6,8 +6,10 @@
 // the employee can never reach CRM data even if her token leaked.
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const multer = require("multer");
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
 const ShopifyOrder = require("../../models/janmarini/ShopifyOrder");
 const Purchase = require("../../models/janmarini/Purchase");
@@ -17,6 +19,8 @@ const Notification = require("../../models/janmarini/Notification");
 const { runDailySync } = require("../../services/janmariniSync");
 const { fulfillShopifyOrder } = require("../../services/shopifyFulfillment");
 const { confirmPendingReceipt, rejectPendingReceipt } = require("../../services/janmariniReceiptParser");
+const { parseEbayBillPdf } = require("../../services/ebayBillParser");
+const { uploadBufferToCloudinary } = require("../../services/cloudinaryUpload");
 
 const getEmployeeSecret = () => process.env.JANMARINI_JWT_SECRET || "janmarini-dev-secret-change-me";
 
@@ -367,6 +371,80 @@ router.post("/owner/notifications/mark-all-read", ownerAuth, async (req, res) =>
   try {
     await Notification.updateMany({ read: false }, { read: true });
     res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+// ---- Upload Purchases -------------------------------------------------------
+// Replaces the old email-guessing purchase pipeline: the owner uploads the
+// eBay bill PDF, the (deterministic, fixed-layout) parser extracts the line
+// items, and the owner manually assigns each one to a Shopify order/item —
+// see ebayBillParser.js for why PDF extraction here is safe where the old
+// freeform-email matching wasn't.
+router.post("/owner/purchases/upload", ownerAuth, upload.single("bill"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+    const [parsed, receiptUrl] = await Promise.all([
+      parseEbayBillPdf(req.file.buffer),
+      uploadBufferToCloudinary(req.file.buffer, req.file.originalname || "ebay-bill.pdf", "application/pdf"),
+    ]);
+
+    if (!parsed.items.length) {
+      return res.status(422).json({ message: "Could not find any item lines in this PDF — is it an eBay 'Order details' export?" });
+    }
+
+    const openOrders = await ShopifyOrder.find({ ignored: false, fulfilled: false })
+      .select("orderNumber customerName items.name items.quantity")
+      .sort({ orderDate: -1 })
+      .lean();
+
+    res.json({
+      receiptUrl,
+      purchaseDate: parsed.purchaseDate,
+      items: parsed.items,
+      openOrders: openOrders.map((o) => ({
+        orderNumber: o.orderNumber,
+        customerName: o.customerName,
+        items: o.items.map((i) => ({ name: i.name, quantity: i.quantity })),
+      })),
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
+// Second step: the owner has picked, for each extracted bill line, either a
+// Shopify order + which of its items it fulfills, or "stock" (no order yet).
+// One Purchase doc per assignment. itemName is taken from the ORDER's own
+// catalog item name when assigned (never the eBay listing title) — a
+// mismatch there is what silently broke the dashboard's item matching
+// before (see conversation history, itemName exact-match bug).
+router.post("/owner/purchases/confirm", ownerAuth, async (req, res) => {
+  try {
+    const { receiptUrl, purchaseDate, assignments } = req.body || {};
+    if (!Array.isArray(assignments) || !assignments.length) {
+      return res.status(400).json({ message: "No assignments provided" });
+    }
+
+    const docs = assignments.map((a) => ({
+      orderNumber: a.orderNumber || "",
+      itemName: a.orderNumber ? String(a.orderItemName || "").trim() || String(a.itemName).trim() : String(a.itemName).trim(),
+      quantity: Number(a.quantity) || 1,
+      ebayOrderNumber: a.ebayOrderNumber || "",
+      ebayItemId: a.ebayItemId || "",
+      seller: a.seller || "",
+      costUSD: Number(a.costUSD) || 0,
+      status: "ordered",
+      purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+      receiptFiles: receiptUrl ? [receiptUrl] : [],
+      isStock: !a.orderNumber,
+      stockNote: !a.orderNumber ? a.stockNote || "Uploaded via Upload Purchases, not yet assigned to an order." : "",
+    }));
+
+    const created = await Purchase.insertMany(docs);
+    res.status(201).json(created);
   } catch (e) {
     res.status(400).json({ message: e.message });
   }

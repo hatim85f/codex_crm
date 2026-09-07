@@ -20,6 +20,14 @@ const PurchaseSchema = new Schema(
     quantity: { type: Number, default: 1 },
 
     ebayOrderNumber: { type: String, default: "" },
+    // eBay's own listing id (the number in parentheses on the bill, e.g.
+    // "(407165878999)") -- unique per item, unlike ebayOrderNumber which can
+    // cover several items in one checkout. eBay's "shipped"/"order update"
+    // notification emails carry this same id in their tracking links, so
+    // it's the join key the shipped-email watcher uses (see
+    // services/ebayShippedWatcher.js) -- those emails never contain a
+    // plaintext seller tracking number, only this id.
+    ebayItemId: { type: String, default: "", index: true },
     seller: { type: String, default: "" },
     costUSD: { type: Number, default: 0 }, // never exposed to employee dashboard
     sellerTracking: { type: String, default: "" }, // USPS/seller tracking, active before Shop & Ship pickup

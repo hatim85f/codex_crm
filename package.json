@@ -22,6 +22,8 @@
     "jsonwebtoken": "^9.0.3",
     "mailparser": "^3.9.12",
     "mongoose": "^8.19.2",
+    "multer": "^2.3.0",
+    "pdf-parse": "^2.4.5",
     "pdfkit": "^0.19.1",
     "stripe": "^22.2.2"
   }
