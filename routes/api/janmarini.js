@@ -20,6 +20,7 @@ const { runDailySync } = require("../../services/janmariniSync");
 const { fulfillShopifyOrder } = require("../../services/shopifyFulfillment");
 const { confirmPendingReceipt, rejectPendingReceipt } = require("../../services/janmariniReceiptParser");
 const { parseEbayBillPdf } = require("../../services/ebayBillParser");
+const { registerPurchaseWithShipito } = require("../../services/shipitoSync");
 const { uploadBufferToCloudinary } = require("../../services/cloudinaryUpload");
 
 const getEmployeeSecret = () => process.env.JANMARINI_JWT_SECRET || "janmarini-dev-secret-change-me";
@@ -445,6 +446,23 @@ router.post("/owner/purchases/confirm", ownerAuth, async (req, res) => {
 
     const created = await Purchase.insertMany(docs);
     res.status(201).json(created);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+// Registers a purchase with Shipito once its real seller/USPS tracking
+// number is known (Shipito can't be polled for status until this happens --
+// see services/shipitoSync.js). Manual for now: eBay's own shipped emails
+// never include this number as text, only a link requiring an eBay login.
+router.post("/owner/purchases/:id/register-shipito", ownerAuth, async (req, res) => {
+  try {
+    const { trackingNumber } = req.body || {};
+    if (!trackingNumber || !String(trackingNumber).trim()) {
+      return res.status(400).json({ message: "trackingNumber is required" });
+    }
+    const purchase = await registerPurchaseWithShipito(req.params.id, String(trackingNumber).trim());
+    res.json(purchase);
   } catch (e) {
     res.status(400).json({ message: e.message });
   }

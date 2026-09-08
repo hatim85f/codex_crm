@@ -12,6 +12,7 @@ const { syncCrmProfitRecords } = require("./janmariniCrmSync");
 const { processPendingReceipts } = require("./janmariniReceiptParser");
 const { trackDhlShipment, mapDhlStatusToInternal } = require("./dhlTracking");
 const { syncEbayShippedStatus } = require("./ebayShippedWatcher");
+const { syncShipitoStatus } = require("./shipitoSync");
 
 const IGNORED_ORDER_NUMBERS = ["#1760", "#1761", "#1762", "#1754", "#1766"];
 
@@ -330,13 +331,14 @@ async function assignInOfficeStockToOrders() {
 async function runDailySync() {
   const shopify = await syncShopifyOrders().catch((e) => ({ error: e.message }));
   const ebayShipped = await syncEbayShippedStatus().catch((e) => ({ error: e.message }));
+  const shipito = await syncShipitoStatus().catch((e) => ({ error: e.message }));
   const aramex = await syncAramexTracking().catch((e) => ({ error: e.message }));
   const dhl = await syncDhlTracking().catch((e) => ({ error: e.message }));
   // Run stock auto-assignment BEFORE the CRM sync so any newly-assigned item's
   // cost is included in the same run's profit records.
   const stock = await assignInOfficeStockToOrders().catch((e) => ({ error: e.message }));
   const crm = await syncCrmProfitRecords().catch((e) => ({ error: e.message }));
-  const result = { shopify, ebayShipped, aramex, dhl, stock, crm };
+  const result = { shopify, ebayShipped, shipito, aramex, dhl, stock, crm };
   const criticalErrors = [];
   for (const [step, value] of Object.entries({ shopify, stock, crm })) {
     if (value?.error) criticalErrors.push(`${step}: ${value.error}`);

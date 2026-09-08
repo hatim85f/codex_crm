@@ -47,6 +47,13 @@ const PurchaseSchema = new Schema(
     isStock: { type: Boolean, default: false, index: true },
     stockNote: { type: String, default: "" }, // e.g. "from cancelled order #1754"
     shopAndShipTracking: { type: String, default: "" }, // lightweight tracking # for stock items with no full InboundShipment record yet
+
+    // Shipito for Business API linkage -- set once we register this package
+    // with Shipito via createPackage (needs a real sellerTracking first, see
+    // services/shipitoApi.js). Lets syncShipitoStatus() poll this specific
+    // package's status/tracking without re-registering it every run.
+    shipitoReferenceNumber: { type: String, default: "", index: true },
+    shipitoPackageId: { type: String, default: "" }, // Shipito's own letter-code package ID, for cross-checking on their website
   },
   { timestamps: true }
 );
