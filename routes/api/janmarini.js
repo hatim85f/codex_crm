@@ -432,6 +432,7 @@ router.post("/owner/purchases/confirm", ownerAuth, async (req, res) => {
     const docs = assignments.map((a) => ({
       orderNumber: a.orderNumber || "",
       itemName: a.orderNumber ? String(a.orderItemName || "").trim() || String(a.itemName).trim() : String(a.itemName).trim(),
+      ebayListingName: String(a.itemName || "").trim(),
       quantity: Number(a.quantity) || 1,
       ebayOrderNumber: a.ebayOrderNumber || "",
       ebayItemId: a.ebayItemId || "",

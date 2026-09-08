@@ -28,6 +28,16 @@ const PurchaseSchema = new Schema(
     // services/ebayShippedWatcher.js) -- those emails never contain a
     // plaintext seller tracking number, only this id.
     ebayItemId: { type: String, default: "", index: true },
+    // The raw eBay listing title as extracted from the purchase bill (e.g.
+    // "Jan Marini C-Esta Face Serum 1 oz - Exp 07/27 Brand New in Box") --
+    // kept separately from itemName because itemName gets overwritten with
+    // the Shopify order's own catalog name once assigned (e.g. "C-ESTA®
+    // Face Serum"). Some seller shipping-notification emails only carry an
+    // item name and a tracking number, no eBay item ID -- this is what
+    // ebayShippedWatcher.js matches those against, since the order's catalog
+    // name is worded too differently from the seller's own listing title to
+    // match reliably.
+    ebayListingName: { type: String, default: "" },
     seller: { type: String, default: "" },
     costUSD: { type: Number, default: 0 }, // never exposed to employee dashboard
     sellerTracking: { type: String, default: "" }, // USPS/seller tracking, active before Shop & Ship pickup
