@@ -56,6 +56,11 @@ const PurchaseSchema = new Schema(
     // reuses status/cost/tracking instead of duplicating them.
     isStock: { type: Boolean, default: false, index: true },
     stockNote: { type: String, default: "" }, // e.g. "from cancelled order #1754"
+    // The order this was originally bought for, kept once freed to stock so
+    // the "on the way" view can still show provenance (freeDroppedLineItems
+    // clears `orderNumber` but not this) -- distinct from `orderNumber`,
+    // which always means "currently reserved for".
+    originOrderNumber: { type: String, default: "" },
     shopAndShipTracking: { type: String, default: "" }, // lightweight tracking # for stock items with no full InboundShipment record yet
 
     // Shipito for Business API linkage -- set once we register this package

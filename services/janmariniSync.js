@@ -36,7 +36,9 @@ const ORDERS_QUERY = `
           shippingAddress { address1 address2 city country phone }
           totalPriceSet { shopMoney { amount currencyCode } }
           displayFulfillmentStatus
+          displayFinancialStatus
           cancelledAt
+          closedAt
           fulfillments(first: 5) { createdAt }
           lineItems(first: 50) {
             edges {
@@ -46,6 +48,15 @@ const ORDERS_QUERY = `
                 image { url }
                 originalUnitPriceSet { shopMoney { amount } }
               }
+            }
+          }
+          # A single line can be refunded (money back for it) without touching
+          # lineItems.quantity or the order's own cancelledAt/closedAt --
+          # this is the only signal that actually shows that up (see
+          # freeDroppedLineItems below).
+          refunds {
+            refundLineItems(first: 20) {
+              edges { node { quantity lineItem { name } } }
             }
           }
         }
@@ -104,7 +115,7 @@ async function syncShopifyOrders() {
     for (const { node: o } of edges) {
       const orderNumber = o.name; // already "#1750"-style
       const money = o.totalPriceSet?.shopMoney;
-      const existing = await ShopifyOrder.findOne({ shopifyOrderId: o.id }).select("fulfilled ignored");
+      const existing = await ShopifyOrder.findOne({ shopifyOrderId: o.id }).select("fulfilled ignored items");
       // Reconciliation safety net: the webhook usually flips `fulfilled` the moment
       // an order is fulfilled in Shopify, but this catches it too if the webhook
       // was missed/down — either path moves the order into the app's History tab.
@@ -132,10 +143,18 @@ async function syncShopifyOrders() {
         totalPrice: Number(money?.amount) || 0,
         currency: money?.currencyCode || "AED",
         // Cancelled orders auto-hide (Shopify's own cancelledAt is authoritative).
-        // A manual ignore flag (e.g. a refunded-but-not-cancelled order) or the
-        // hardcoded legacy list is preserved across re-syncs either way -- once
-        // true, only a human un-ignoring it in the DB turns it back off.
-        ignored: !!o.cancelledAt || IGNORED_ORDER_NUMBERS.includes(orderNumber) || existing?.ignored || false,
+        // Some orders never go through Shopify's formal "Cancel order" action —
+        // they just get fully refunded and closed instead, leaving cancelledAt
+        // null forever (seen live: #1778) -- REFUNDED + closedAt set is treated
+        // the same as a real cancellation for our purposes. A manual ignore flag
+        // or the hardcoded legacy list is preserved across re-syncs either way --
+        // once true, only a human un-ignoring it in the DB turns it back off.
+        ignored:
+          !!o.cancelledAt ||
+          (o.displayFinancialStatus === "REFUNDED" && !!o.closedAt) ||
+          IGNORED_ORDER_NUMBERS.includes(orderNumber) ||
+          existing?.ignored ||
+          false,
         items: o.lineItems.edges.map(({ node: li }) => ({
           name: li.name,
           quantity: li.quantity,
@@ -147,6 +166,24 @@ async function syncShopifyOrders() {
         update.fulfilled = true;
         update.fulfilledAt = existing?.fulfilled ? undefined : new Date(o.fulfillments?.[0]?.createdAt || Date.now());
       }
+      // A customer can cancel/refund just ONE line of a still-open order
+      // (order stays active, only that item's quantity drops or disappears)
+      // -- this never sets `ignored`, so without this the item we already
+      // bought for it silently keeps sitting there tagged to a need that no
+      // longer exists, and it's easy to forget it's already on the way and
+      // buy a second one. Catch it here, on every sync: a dropped line can
+      // show up either as a reduced/removed lineItems entry (an order edit)
+      // or, far more commonly, as a refund against an unchanged line (see
+      // #1801 -- Benzoyl Peroxide 10% refunded 12 Sep, lineItems still says
+      // qty 1) -- take whichever signal reports more units dropped.
+      const refundedByName = new Map();
+      for (const refund of o.refunds || []) {
+        for (const { node: rli } of refund.refundLineItems?.edges || []) {
+          const key = norm(rli.lineItem?.name);
+          if (key) refundedByName.set(key, (refundedByName.get(key) || 0) + rli.quantity);
+        }
+      }
+      await freeDroppedLineItems(orderNumber, existing?.items, update.items, refundedByName);
       await ShopifyOrder.findOneAndUpdate({ shopifyOrderId: o.id }, update, { upsert: true, new: true });
       if (newlyFulfilled) {
         reconciledFulfilled += 1;
@@ -265,6 +302,80 @@ async function syncDhlTracking() {
 //   - only order items that have NO purchase yet (never overrides live tracking)
 //   - only unfulfilled, non-ignored orders
 const norm = (s) => (s || "").trim().toLowerCase();
+
+// Diffs an order's previous vs current line-item quantities and frees any
+// already-bought Purchase still tied to this order for a unit that's no
+// longer needed (item removed, or its quantity reduced) — converting it to
+// unassigned stock instead of leaving it silently reserved for a need that
+// no longer exists. Runs on every order sync, not just cancellations, since
+// this can happen to a single line of an otherwise-still-open order.
+// Handles partial quantities: if a matched doc's own quantity is bigger than
+// what's actually being freed (e.g. bought 3, only 1 dropped), it shrinks
+// the original in place and spins off a new stock doc for just the freed
+// units, instead of freeing the whole doc and losing the other 2 that are
+// still genuinely needed for this order.
+async function freeDroppedLineItems(orderNumber, previousItems, newItems, refundedByName) {
+  const editDroppedByName = new Map();
+  if (previousItems && previousItems.length) {
+    const prevByName = new Map();
+    for (const i of previousItems) prevByName.set(norm(i.name), (prevByName.get(norm(i.name)) || 0) + i.quantity);
+    const newByName = new Map();
+    for (const i of newItems || []) newByName.set(norm(i.name), (newByName.get(norm(i.name)) || 0) + i.quantity);
+    for (const [name, prevQty] of prevByName) {
+      const dropped = prevQty - (newByName.get(name) || 0);
+      if (dropped > 0) editDroppedByName.set(name, dropped);
+    }
+  }
+
+  const allNames = new Set([...editDroppedByName.keys(), ...(refundedByName ? refundedByName.keys() : [])]);
+  for (const name of allNames) {
+    let remaining = Math.max(editDroppedByName.get(name) || 0, refundedByName?.get(name) || 0);
+    if (remaining <= 0) continue;
+
+    // Re-queried fresh per name (not cached across calls) so this stays
+    // idempotent — once a doc's freed units are accounted for it either
+    // shrinks (still tied to the order, so no longer over-counted as
+    // "dropped" next time since prevQty will already reflect it) or flips
+    // to isStock:true and drops out of this same query entirely, so
+    // re-running never frees more than what's actually still tied to the
+    // order.
+    const candidates = await Purchase.find({ orderNumber, isStock: false, status: { $ne: "delivered" } }).lean();
+    const matches = candidates.filter((p) => norm(p.itemName) === name);
+
+    for (const m of matches) {
+      if (remaining <= 0) break;
+      const freeQty = Math.min(m.quantity, remaining);
+      const noteBase = `Freed — removed/refunded from order ${orderNumber} on Shopify sync`;
+      const stockNote = `${noteBase}${m.stockNote ? ` (${m.stockNote})` : ""}`;
+
+      if (freeQty >= m.quantity) {
+        // The whole doc is no longer needed.
+        await Purchase.findByIdAndUpdate(m._id, {
+          isStock: true,
+          orderNumber: "",
+          originOrderNumber: orderNumber,
+          stockNote,
+        });
+      } else {
+        // Only some of this doc's units are no longer needed — shrink the
+        // original (still reserved for the rest of the order's need) and
+        // spin off a new stock doc carrying just the freed units, copying
+        // its cost/seller/tracking/shipment link so that context isn't lost.
+        const { _id, createdAt, updatedAt, __v, ...rest } = m;
+        await Purchase.findByIdAndUpdate(_id, { quantity: m.quantity - freeQty });
+        await Purchase.create({
+          ...rest,
+          quantity: freeQty,
+          isStock: true,
+          orderNumber: "",
+          originOrderNumber: orderNumber,
+          stockNote,
+        });
+      }
+      remaining -= freeQty;
+    }
+  }
+}
 
 async function assignInOfficeStockToOrders() {
   const stockItems = await Purchase.find({ isStock: true, status: "in_office", quantity: { $gt: 0 } });

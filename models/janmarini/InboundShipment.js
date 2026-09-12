@@ -36,6 +36,7 @@ const InboundShipmentSchema = new Schema(
     status: { type: String, enum: STATUSES, default: "At Origin", index: true },
     lastTrackingCheck: { type: Date, default: null },
     declaredGoodsNote: { type: String, default: "" }, // customs declared value ≠ real cost, never used for matching
+    invoiceFiles: { type: [String], default: [] }, // Cloudinary URLs — Shipito/courier commercial invoice(s), mirrors Purchase.receiptFiles
 
     // Anchor dates for computing ETAs as absolute date ranges instead of a
     // relative day-count that goes stale the moment nobody rechecks it.

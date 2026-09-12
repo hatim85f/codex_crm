@@ -524,8 +524,77 @@ router.get("/stock", employeeAuth, async (req, res) => {
     const decoded = jwt.verify(req.header("x-auth-token"), getEmployeeSecret());
     const isOwner = decoded.role === "janmarini_owner";
     const items = await Purchase.find({ isStock: true }).sort({ updatedAt: -1 }).lean();
-    res.json(
-      items.map((p) => ({
+
+    // Summary: on-hand quantity per item name, split into unassigned (the
+    // rows above, isStock:true) vs assigned (order-linked purchases the
+    // fulfillment team already has in office, reserved for a specific
+    // order). Lets the dashboard show "on hand / assigned / unassigned"
+    // instead of only the unassigned rows, without changing what the
+    // existing editable stock list below is scoped to.
+    //
+    // Order-linked purchases don't get their own `status` hand-flipped to
+    // "in_office" — the real, current status for those comes from the
+    // linked InboundShipment (see rawStatus() above: only once the box's
+    // own status is "Delivered-to-office" is the item actually on hand), so
+    // this has to populate and re-derive it the same way, not trust the raw
+    // field, or a purchase whose shipment is still "In Transit" would
+    // wrongly count as on-hand stock.
+    const byName = new Map();
+    const addToBucket = (itemName, quantity, isStock, orderNumber) => {
+      if (!byName.has(itemName)) byName.set(itemName, { itemName, unassigned: 0, assigned: 0, assignedOrders: [] });
+      const bucket = byName.get(itemName);
+      if (isStock) {
+        bucket.unassigned += quantity;
+      } else if (orderNumber) {
+        bucket.assigned += quantity;
+        bucket.assignedOrders.push({ orderNumber, quantity });
+      }
+    };
+
+    const unassignedInOffice = await Purchase.find({ isStock: true, status: "in_office" })
+      .select("itemName quantity isStock orderNumber")
+      .lean();
+    for (const p of unassignedInOffice) addToBucket(p.itemName, p.quantity, true, p.orderNumber);
+
+    const orderLinked = await Purchase.find({ isStock: false, orderNumber: { $ne: "" }, status: { $ne: "delivered" } })
+      .populate("inboundShipment", "status")
+      .select("itemName quantity orderNumber status inboundShipment")
+      .lean();
+    for (const p of orderLinked) {
+      if (rawStatus(p) === "in_office") addToBucket(p.itemName, p.quantity, false, p.orderNumber);
+    }
+    const summary = [...byName.values()]
+      .map((b) => ({ ...b, onHand: b.unassigned + b.assigned }))
+      .filter((b) => b.onHand > 0)
+      .sort((a, b) => a.itemName.localeCompare(b.itemName));
+
+    // "On the way" — everything already bought (stock or order-linked) that
+    // hasn't reached the office yet, so it's checkable before buying a
+    // second one for the same need. Each row carries its order (current, or
+    // where it originally came from if a cancellation/refund freed it) plus
+    // its courier tracking + live status, so "is one already coming" and
+    // "what's it doing right now" are both answered in one place.
+    const notYetArrived = await Purchase.find({ status: { $ne: "delivered" } })
+      .populate("inboundShipment", "status carrier snsShipmentNumber")
+      .select("itemName quantity isStock orderNumber originOrderNumber status shopAndShipTracking stockNote inboundShipment")
+      .lean();
+    const onTheWay = notYetArrived
+      .filter((p) => rawStatus(p) !== "in_office")
+      .map((p) => ({
+        id: p._id,
+        itemName: p.itemName,
+        quantity: p.quantity,
+        orderNumber: p.orderNumber || "",
+        originOrderNumber: p.originOrderNumber || "",
+        status: displayStatus(p),
+        trackingNumber: p.inboundShipment?.snsShipmentNumber || p.shopAndShipTracking || "",
+        carrier: p.inboundShipment?.carrier || (p.shopAndShipTracking ? "shopandship" : ""),
+        stockNote: p.stockNote || "",
+      }))
+      .sort((a, b) => a.itemName.localeCompare(b.itemName));
+
+    res.json({
+      items: items.map((p) => ({
         id: p._id,
         itemName: p.itemName,
         quantity: p.quantity,
@@ -533,8 +602,10 @@ router.get("/stock", employeeAuth, async (req, res) => {
         shopAndShipTracking: p.shopAndShipTracking || "",
         stockNote: p.stockNote || "",
         ...(isOwner ? { costUSD: p.costUSD || 0 } : {}),
-      }))
-    );
+      })),
+      summary,
+      onTheWay,
+    });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
