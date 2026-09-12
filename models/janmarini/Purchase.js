@@ -11,6 +11,10 @@ const STATUSES = [
   "in_transit_to_dubai",
   "in_office",
   "delivered",
+  // Physical stock that expired before being sold -- kept in the same
+  // collection (not deleted) as a disposal log, but excluded from every
+  // on-hand/available query since those all filter on "in_office".
+  "expired",
 ];
 
 const PurchaseSchema = new Schema(
@@ -56,6 +60,12 @@ const PurchaseSchema = new Schema(
     // reuses status/cost/tracking instead of duplicating them.
     isStock: { type: Boolean, default: false, index: true },
     stockNote: { type: String, default: "" }, // e.g. "from cancelled order #1754"
+    expiry: { type: Date, default: null }, // stock's physical expiry date, set from an inventory count
+    // "professional" = professional/clinical-use range (peels, prepping
+    // solutions, in-office treatment products) vs "retail" (regular
+    // consumer/Shopify-catalog items) -- purely a stock-keeping label so
+    // these don't get treated as regular sellable retail inventory.
+    category: { type: String, enum: ["retail", "professional"], default: "retail" },
     // The order this was originally bought for, kept once freed to stock so
     // the "on the way" view can still show provenance (freeDroppedLineItems
     // clears `orderNumber` but not this) -- distinct from `orderNumber`,

@@ -545,9 +545,10 @@ router.get("/stock", employeeAuth, async (req, res) => {
     // field, or a purchase whose shipment is still "In Transit" would
     // wrongly count as on-hand stock.
     const byName = new Map();
-    const addToBucket = (itemName, quantity, isStock, orderNumber) => {
-      if (!byName.has(itemName)) byName.set(itemName, { itemName, unassigned: 0, assigned: 0, assignedOrders: [] });
+    const addToBucket = (itemName, quantity, isStock, orderNumber, expiry, category) => {
+      if (!byName.has(itemName)) byName.set(itemName, { itemName, unassigned: 0, assigned: 0, assignedOrders: [], nearestExpiry: null, category: category || "retail" });
       const bucket = byName.get(itemName);
+      if (expiry && (!bucket.nearestExpiry || expiry < bucket.nearestExpiry)) bucket.nearestExpiry = expiry;
       if (isStock) {
         bucket.unassigned += quantity;
       } else if (orderNumber) {
@@ -557,9 +558,9 @@ router.get("/stock", employeeAuth, async (req, res) => {
     };
 
     const unassignedInOffice = await Purchase.find({ isStock: true, status: "in_office" })
-      .select("itemName quantity isStock orderNumber")
+      .select("itemName quantity isStock orderNumber expiry category")
       .lean();
-    for (const p of unassignedInOffice) addToBucket(p.itemName, p.quantity, true, p.orderNumber);
+    for (const p of unassignedInOffice) addToBucket(p.itemName, p.quantity, true, p.orderNumber, p.expiry, p.category);
 
     const orderLinked = await Purchase.find({ isStock: false, orderNumber: { $ne: "" }, status: { $ne: "delivered" } })
       .populate("inboundShipment", "status")
@@ -609,6 +610,8 @@ router.get("/stock", employeeAuth, async (req, res) => {
         itemName: p.itemName,
         quantity: p.quantity,
         status: p.status,
+        expiry: p.expiry || null,
+        category: p.category || "retail",
         shopAndShipTracking: p.shopAndShipTracking || "",
         stockNote: p.stockNote || "",
         ...(isOwner ? { costUSD: p.costUSD || 0 } : {}),
@@ -623,7 +626,7 @@ router.get("/stock", employeeAuth, async (req, res) => {
 
 router.post("/stock", employeeAuth, async (req, res) => {
   try {
-    const { itemName, quantity, shopAndShipTracking, stockNote, costUSD } = req.body || {};
+    const { itemName, quantity, shopAndShipTracking, stockNote, costUSD, expiry } = req.body || {};
     if (!itemName || !String(itemName).trim()) {
       return res.status(400).json({ message: "Item name is required" });
     }
@@ -636,6 +639,7 @@ router.post("/stock", employeeAuth, async (req, res) => {
       shopAndShipTracking: shopAndShipTracking || "",
       stockNote: stockNote || "",
       costUSD: isOwner ? Number(costUSD) || 0 : 0, // only the owner can record cost
+      expiry: expiry ? new Date(expiry) : null,
       isStock: true,
       status: "in_office", // fulfillment team only logs stock they physically already have
       orderNumber: "",
@@ -654,7 +658,7 @@ router.put("/stock/:id", employeeAuth, async (req, res) => {
     const doc = await Purchase.findOne({ _id: req.params.id, isStock: true });
     if (!doc) return res.status(404).json({ message: "Stock item not found" });
 
-    const { itemName, quantity, shopAndShipTracking, stockNote, costUSD } = req.body || {};
+    const { itemName, quantity, shopAndShipTracking, stockNote, costUSD, expiry, category } = req.body || {};
     if (itemName !== undefined) {
       if (!String(itemName).trim()) return res.status(400).json({ message: "Item name is required" });
       doc.itemName = String(itemName).trim();
@@ -663,6 +667,8 @@ router.put("/stock/:id", employeeAuth, async (req, res) => {
     if (shopAndShipTracking !== undefined) doc.shopAndShipTracking = shopAndShipTracking || "";
     if (stockNote !== undefined) doc.stockNote = stockNote || "";
     if (costUSD !== undefined && isOwner) doc.costUSD = Number(costUSD) || 0;
+    if (expiry !== undefined) doc.expiry = expiry ? new Date(expiry) : null;
+    if (category !== undefined && ["retail", "professional"].includes(category)) doc.category = category;
 
     await doc.save();
     res.json(doc);
