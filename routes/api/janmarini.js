@@ -523,7 +523,12 @@ router.get("/stock", employeeAuth, async (req, res) => {
   try {
     const decoded = jwt.verify(req.header("x-auth-token"), getEmployeeSecret());
     const isOwner = decoded.role === "janmarini_owner";
-    const items = await Purchase.find({ isStock: true }).sort({ updatedAt: -1 }).lean();
+    // "in_office" only — this is the physical, already-in-hand stock list.
+    // An unassigned item bought but not yet arrived (e.g. uploaded via
+    // Upload Purchases with no order picked) is real, just not on hand yet
+    // — it belongs in "On the Way" (below), not here, or it reads as
+    // available inventory before it actually is.
+    const items = await Purchase.find({ isStock: true, status: "in_office" }).sort({ updatedAt: -1 }).lean();
 
     // Summary: on-hand quantity per item name, split into unassigned (the
     // rows above, isStock:true) vs assigned (order-linked purchases the
