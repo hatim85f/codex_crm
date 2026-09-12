@@ -672,6 +672,47 @@ router.delete("/stock/:id", employeeAuth, async (req, res) => {
   }
 });
 
+// Edit/delete for the "On the Way" list — unlike /stock/:id above, this
+// covers BOTH unassigned stock AND order-linked purchases (that list shows
+// both), since a purchase can need correcting there too (e.g. a duplicate
+// bill upload, or the wrong order/item picked while confirming one).
+router.put("/purchases/:id", employeeAuth, async (req, res) => {
+  try {
+    const decoded = jwt.verify(req.header("x-auth-token"), getEmployeeSecret());
+    const isOwner = decoded.role === "janmarini_owner";
+    const doc = await Purchase.findById(req.params.id);
+    if (!doc) return res.status(404).json({ message: "Purchase not found" });
+
+    const { itemName, quantity, orderNumber, stockNote, costUSD } = req.body || {};
+    if (itemName !== undefined) {
+      if (!String(itemName).trim()) return res.status(400).json({ message: "Item name is required" });
+      doc.itemName = String(itemName).trim();
+    }
+    if (quantity !== undefined) doc.quantity = Number(quantity) || 1;
+    if (orderNumber !== undefined) {
+      doc.orderNumber = String(orderNumber).trim();
+      doc.isStock = !doc.orderNumber;
+    }
+    if (stockNote !== undefined) doc.stockNote = stockNote || "";
+    if (costUSD !== undefined && isOwner) doc.costUSD = Number(costUSD) || 0;
+
+    await doc.save();
+    res.json(doc);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
+router.delete("/purchases/:id", employeeAuth, async (req, res) => {
+  try {
+    const doc = await Purchase.findByIdAndDelete(req.params.id);
+    if (!doc) return res.status(404).json({ message: "Purchase not found" });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+});
+
 // ---- Admin / agent endpoints ----------------------------------------------
 
 function adminAuth(req, res, next) {
