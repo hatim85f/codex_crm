@@ -581,7 +581,7 @@ router.get("/stock", employeeAuth, async (req, res) => {
     // "what's it doing right now" are both answered in one place.
     const notYetArrived = await Purchase.find({ status: { $ne: "delivered" } })
       .populate("inboundShipment", "status carrier snsShipmentNumber")
-      .select("itemName quantity isStock orderNumber originOrderNumber status shopAndShipTracking stockNote inboundShipment")
+      .select("itemName quantity isStock orderNumber originOrderNumber status ebayOrderNumber sellerTracking shopAndShipTracking stockNote inboundShipment")
       .lean();
     const onTheWay = notYetArrived
       .filter((p) => rawStatus(p) !== "in_office")
@@ -591,7 +591,12 @@ router.get("/stock", employeeAuth, async (req, res) => {
         quantity: p.quantity,
         orderNumber: p.orderNumber || "",
         originOrderNumber: p.originOrderNumber || "",
-        status: displayStatus(p),
+        // The full pipeline status (not the collapsed employee-facing
+        // displayStatus()) -- this page is exactly where "shipped by seller"
+        // vs plain "ordered" needs to be visible, not folded together.
+        status: rawStatus(p),
+        ebayOrderNumber: p.ebayOrderNumber || "",
+        sellerTracking: p.sellerTracking || "",
         trackingNumber: p.inboundShipment?.snsShipmentNumber || p.shopAndShipTracking || "",
         carrier: p.inboundShipment?.carrier || (p.shopAndShipTracking ? "shopandship" : ""),
         stockNote: p.stockNote || "",
