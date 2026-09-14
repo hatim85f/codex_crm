@@ -578,7 +578,10 @@ router.get("/stock", employeeAuth, async (req, res) => {
     // where it originally came from if a cancellation/refund freed it) plus
     // its courier tracking + live status, so "is one already coming" and
     // "what's it doing right now" are both answered in one place.
-    const notYetArrived = await Purchase.find({ status: { $ne: "delivered" } })
+    // Excludes "delivered" (obviously arrived) AND "expired" (disposed-of
+    // stock kept as a log, not something still in transit — it used to leak
+    // through here since only "delivered" was excluded).
+    const notYetArrived = await Purchase.find({ status: { $nin: ["delivered", "expired"] } })
       .populate("inboundShipment", "status carrier snsShipmentNumber")
       .select("itemName quantity isStock orderNumber originOrderNumber status ebayOrderNumber sellerTracking shopAndShipTracking stockNote inboundShipment")
       .lean();
