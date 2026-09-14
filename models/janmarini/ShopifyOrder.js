@@ -40,6 +40,22 @@ const ShopifyOrderSchema = new Schema(
     // native Order Printer app has no headless/API way to produce one (it's a
     // browser-only "print to PDF" action) — see janmariniInvoice.js.
     invoiceUrl: { type: String, default: "" },
+
+    // Outbound (Dubai -> customer) last-mile courier, set from
+    // ShipmentPrintFields when the fulfillment team prints the address label.
+    // Distinct from the inbound Shop & Ship/Aramex tracking already tracked
+    // per-Purchase via InboundShipment.snsShipmentNumber (that's the US ->
+    // Dubai forwarding leg, not the local delivery to the customer).
+    // No live status polling yet -- Aramex has no public tracking API access
+    // configured for this account; outboundTrackingStatus stays "" until
+    // that's wired up (see services/aramexTracking.js).
+    outboundCourier: { type: String, default: "" }, // "Aramex" | "DHL" | "Other" | ""
+    outboundTrackingNumber: { type: String, default: "" },
+    outboundCollectionReference: { type: String, default: "" }, // Aramex sometimes only issues this at pickup, before the real waybill number exists
+    outboundTrackingStatus: { type: String, default: "" },
+    outboundLastTrackingCheck: { type: Date, default: null },
+    outboundDeliveredAt: { type: Date, default: null },
+    outboundTrackingSavedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

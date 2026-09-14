@@ -209,6 +209,13 @@ router.get("/orders", employeeAuth, async (req, res) => {
           items.filter((i) => i.aramexTracking).map((i) => [i.aramexTracking, `${carrierLabel(i.trackingCarrier)}: ${i.aramexTracking}`])
         ).values()],
         items,
+        // Outbound (Dubai -> customer) courier, saved from ShipmentPrintFields
+        // — separate from the inbound tracking already in trackingBadges/items.
+        outboundCourier: o.outboundCourier || "",
+        outboundTrackingNumber: o.outboundTrackingNumber || "",
+        outboundCollectionReference: o.outboundCollectionReference || "",
+        outboundTrackingStatus: o.outboundTrackingStatus || "",
+        outboundDeliveredAt: o.outboundDeliveredAt || null,
       };
     });
 
@@ -300,6 +307,11 @@ router.get("/owner/orders", ownerAuth, async (req, res) => {
         deliveryFeeAED,
         profit,
         items,
+        outboundCourier: o.outboundCourier || "",
+        outboundTrackingNumber: o.outboundTrackingNumber || "",
+        outboundCollectionReference: o.outboundCollectionReference || "",
+        outboundTrackingStatus: o.outboundTrackingStatus || "",
+        outboundDeliveredAt: o.outboundDeliveredAt || null,
       };
     });
 
@@ -487,17 +499,47 @@ router.post("/owner/sync-now", ownerAuth, async (req, res) => {
   }
 });
 
+// Saves the outbound (Dubai -> customer) courier + tracking number, set from
+// ShipmentPrintFields right before/after printing the address label. Kept as
+// its own endpoint (not folded into fulfill) since the team often knows the
+// tracking number before the order is actually packed and handed over.
+router.put("/orders/:orderNumber/shipment", employeeAuth, async (req, res) => {
+  const orderNumber = decodeURIComponent(req.params.orderNumber);
+  const { courier = "", trackingNumber = "", collectionReference = "" } = req.body || {};
+  try {
+    const order = await ShopifyOrder.findOneAndUpdate(
+      { orderNumber },
+      {
+        outboundCourier: courier,
+        outboundTrackingNumber: trackingNumber,
+        outboundCollectionReference: collectionReference,
+        outboundTrackingSavedAt: new Date(),
+      },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ message: "Order not found" });
+    res.json({
+      success: true,
+      outboundCourier: order.outboundCourier,
+      outboundTrackingNumber: order.outboundTrackingNumber,
+      outboundCollectionReference: order.outboundCollectionReference,
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+});
+
 // Employee marks an order as packed/handed over. Fulfills it in Shopify too
-// (so both systems agree), attaching Aramex tracking if we already have one.
+// (so both systems agree), attaching the outbound Aramex tracking number if
+// we have one saved (NOT the inbound Shop & Ship/US-forwarder number that
+// used to be used here by mistake — that's the wrong leg for the customer).
 router.post("/orders/:orderNumber/fulfill", employeeAuth, async (req, res) => {
   const orderNumber = decodeURIComponent(req.params.orderNumber);
   try {
     const order = await ShopifyOrder.findOne({ orderNumber });
     if (!order) return res.status(404).json({ message: "Order not found" });
 
-    const purchases = await Purchase.find({ orderNumber }).populate("inboundShipment", "snsShipmentNumber");
-    const trackingNumber = purchases.find((p) => p.inboundShipment?.snsShipmentNumber)?.inboundShipment
-      ?.snsShipmentNumber;
+    const trackingNumber = order.outboundTrackingNumber || undefined;
 
     await fulfillShopifyOrder(order.shopifyOrderId, trackingNumber);
 
